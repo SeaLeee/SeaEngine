@@ -1,0 +1,32 @@
+# Build outputs
+build/
+out/
+cmake-build-*/
+*.vcxproj*
+*.sln
+
+# IDE
+.vs/
+.vscode/
+*.user
+*.suo
+
+# Compiled
+*.obj
+*.o
+*.exe
+*.dll
+*.lib
+*.pdb
+*.ilk
+*.exp
+
+# Shader bytecode
+*.cso
+*.dxil
+
+# Logs
+*.log
+
+# Dependencies (fetched by CMake)
+_deps/
