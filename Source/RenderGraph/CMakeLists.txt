@@ -1,6 +1,6 @@
 add_library(SeaRenderGraph STATIC
     RenderGraph.cpp
-    RenderPass.cpp
+    RenderPassContext.cpp
     ResourceNode.cpp
     PassNode.cpp
     GraphCompiler.cpp
@@ -15,4 +15,5 @@ target_include_directories(SeaRenderGraph PUBLIC
 target_link_libraries(SeaRenderGraph PUBLIC 
     SeaCore
     SeaGraphics
+    nlohmann_json::nlohmann_json
 )

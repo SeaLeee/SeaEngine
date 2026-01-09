@@ -1,5 +1,6 @@
 #include "SampleApp.h"
 #include "Core/Input.h"
+#include "Core/Log.h"
 #include "Graphics/RenderDocCapture.h"
 
 namespace Sea
@@ -15,57 +16,72 @@ namespace Sea
 
     bool SampleApp::OnInitialize()
     {
-        // åˆå§‹åŒ–RenderDoc
+        SEA_CORE_INFO("SampleApp::OnInitialize starting...");
+        
+        // ³õÊ¼»¯RenderDoc
         RenderDocCapture::Initialize();
 
-        // åˆå§‹åŒ–å›¾å½¢è®¾å¤‡
+        // ³õÊ¼»¯Í¼ĞÎÉè±¸
+        SEA_CORE_INFO("Creating Device...");
         m_Device = MakeScope<Device>();
         if (!m_Device->Initialize())
             return false;
 
-        // åˆ›å»ºå‘½ä»¤é˜Ÿåˆ—
+        // ´´½¨ÃüÁî¶ÓÁĞ
+        SEA_CORE_INFO("Creating CommandQueue...");
         m_GraphicsQueue = MakeScope<CommandQueue>(*m_Device, CommandQueueType::Graphics);
         if (!m_GraphicsQueue->Initialize())
             return false;
 
-        // åˆ›å»ºäº¤æ¢é“¾
+        // ´´½¨½»»»Á´
+        SEA_CORE_INFO("Creating SwapChain...");
         SwapChainDesc swapDesc;
         swapDesc.hwnd = m_Window->GetHandle();
         swapDesc.width = m_Window->GetWidth();
         swapDesc.height = m_Window->GetHeight();
-        m_SwapChain = MakeScope<SwapChain>(*m_Device, swapDesc);
+        m_SwapChain = MakeScope<SwapChain>(*m_Device, *m_GraphicsQueue, swapDesc);
         if (!m_SwapChain->Initialize())
             return false;
 
-        // åˆ›å»ºå‘½ä»¤åˆ—è¡¨
-        m_CommandList = MakeScope<CommandList>(*m_Device, CommandQueueType::Graphics);
-        if (!m_CommandList->Initialize())
-            return false;
+        // ´´½¨ÃüÁîÁĞ±í£¨Ã¿Ö¡»º³åÒ»¸ö£©
+        SEA_CORE_INFO("Creating CommandLists...");
+        u32 bufferCount = m_SwapChain->GetBufferCount();
+        m_CommandLists.resize(bufferCount);
+        for (u32 i = 0; i < bufferCount; ++i)
+        {
+            m_CommandLists[i] = MakeScope<CommandList>(*m_Device, CommandQueueType::Graphics);
+            if (!m_CommandLists[i]->Initialize())
+                return false;
+        }
 
-        // åˆå§‹åŒ–ImGui
+        // ³õÊ¼»¯ImGui
+        SEA_CORE_INFO("Initializing ImGui...");
         m_ImGuiRenderer = MakeScope<ImGuiRenderer>(*m_Device, *m_Window);
         if (!m_ImGuiRenderer->Initialize(m_SwapChain->GetBufferCount(), m_SwapChain->GetFormat()))
             return false;
+        
+        // Í¨Öª´°¿Ú ImGui ÒÑ¾ÍĞ÷
+        m_Window->SetImGuiReady(true);
 
-        // åˆå§‹åŒ–Shaderç³»ç»Ÿ
+        // ³õÊ¼»¯ShaderÏµÍ³
         ShaderCompiler::Initialize();
         m_ShaderLibrary = MakeScope<ShaderLibrary>();
 
-        // åˆ›å»ºRenderGraph
+        // ´´½¨RenderGraph
         m_RenderGraph = MakeScope<RenderGraph>();
         SetupRenderGraph();
 
-        // åˆ›å»ºç¼–è¾‘å™¨ç»„ä»¶
+        // ´´½¨±à¼­Æ÷×é¼ş
         m_NodeEditor = MakeScope<NodeEditor>(*m_RenderGraph);
         m_NodeEditor->Initialize();
 
         m_PropertyPanel = MakeScope<PropertyPanel>(*m_RenderGraph);
         m_ShaderEditor = MakeScope<ShaderEditor>();
 
-        // å¸§åŒæ­¥
+        // Ö¡Í¬²½
         m_FrameFenceValues.resize(m_SwapChain->GetBufferCount(), 0);
 
-        // åˆå§‹åŒ–è¾“å…¥
+        // ³õÊ¼»¯ÊäÈë
         Input::Initialize(m_Window->GetHandle());
 
         SEA_CORE_INFO("SampleApp initialized successfully");
@@ -83,7 +99,7 @@ namespace Sea
         m_ShaderLibrary.reset();
         ShaderCompiler::Shutdown();
         m_ImGuiRenderer.reset();
-        m_CommandList.reset();
+        m_CommandLists.clear();
         m_SwapChain.reset();
         m_GraphicsQueue.reset();
         m_Device.reset();
@@ -95,7 +111,7 @@ namespace Sea
     {
         Input::Update();
 
-        // F12è§¦å‘RenderDocæˆªå¸§
+        // F12´¥·¢RenderDoc½ØÖ¡
         if (Input::IsKeyPressed(KeyCode::F12))
         {
             RenderDocCapture::TriggerCapture();
@@ -104,15 +120,15 @@ namespace Sea
 
         m_ImGuiRenderer->BeginFrame();
 
-        // ä¸»Dockç©ºé—´
+        // Ö÷Dock¿Õ¼ä
         ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport());
 
-        // æ¸²æŸ“ç¼–è¾‘å™¨UI
+        // äÖÈ¾±à¼­Æ÷UI
         m_NodeEditor->Render();
         m_PropertyPanel->Render();
         m_ShaderEditor->Render();
 
-        // æ¸²æŸ“ç»Ÿè®¡çª—å£
+        // äÖÈ¾Í³¼Æ´°¿Ú
         ImGui::Begin("Statistics");
         ImGui::Text("Frame Time: %.3f ms", deltaTime * 1000.0f);
         ImGui::Text("FPS: %.1f", 1.0f / deltaTime);
@@ -128,58 +144,61 @@ namespace Sea
 
     void SampleApp::OnRender()
     {
-        // ç­‰å¾…å½“å‰å¸§èµ„æºå¯ç”¨
+        // µÈ´ıµ±Ç°Ö¡×ÊÔ´¿ÉÓÃ
         m_FrameIndex = m_SwapChain->GetCurrentBackBufferIndex();
         m_GraphicsQueue->WaitForFence(m_FrameFenceValues[m_FrameIndex]);
 
-        // é‡ç½®å‘½ä»¤åˆ—è¡¨
-        m_CommandList->Reset();
+        // »ñÈ¡µ±Ç°Ö¡µÄÃüÁîÁĞ±í
+        auto& cmdList = m_CommandLists[m_FrameIndex];
 
-        // è½¬æ¢åç¼“å†²åˆ°æ¸²æŸ“ç›®æ ‡çŠ¶æ€
-        m_CommandList->TransitionBarrier(
+        // ÖØÖÃÃüÁîÁĞ±í
+        cmdList->Reset();
+
+        // ×ª»»ºó»º³åµ½äÖÈ¾Ä¿±ê×´Ì¬
+        cmdList->TransitionBarrier(
             m_SwapChain->GetCurrentBackBuffer(),
             ResourceState::Present,
             ResourceState::RenderTarget
         );
-        m_CommandList->FlushBarriers();
+        cmdList->FlushBarriers();
 
-        // æ¸…é™¤åç¼“å†²
+        // Çå³ıºó»º³å
         f32 clearColor[] = { 0.1f, 0.1f, 0.15f, 1.0f };
-        m_CommandList->ClearRenderTarget(m_SwapChain->GetCurrentRTV(), clearColor);
+        cmdList->ClearRenderTarget(m_SwapChain->GetCurrentRTV(), clearColor);
 
-        // è®¾ç½®æ¸²æŸ“ç›®æ ‡
+        // ÉèÖÃäÖÈ¾Ä¿±ê
         auto rtv = m_SwapChain->GetCurrentRTV();
-        m_CommandList->SetRenderTargets({ &rtv, 1 });
+        cmdList->SetRenderTargets({ &rtv, 1 });
 
-        // è®¾ç½®è§†å£
+        // ÉèÖÃÊÓ¿Ú
         Viewport viewport = { 0, 0, static_cast<f32>(m_Window->GetWidth()), 
                               static_cast<f32>(m_Window->GetHeight()), 0, 1 };
         ScissorRect scissor = { 0, 0, static_cast<i32>(m_Window->GetWidth()), 
                                 static_cast<i32>(m_Window->GetHeight()) };
-        m_CommandList->SetViewport(viewport);
-        m_CommandList->SetScissorRect(scissor);
+        cmdList->SetViewport(viewport);
+        cmdList->SetScissorRect(scissor);
 
-        // æ‰§è¡ŒRenderGraph (å¦‚æœå·²ç¼–è¯‘)
-        // m_RenderGraph->Execute(*m_CommandList);
+        // Ö´ĞĞRenderGraph (Èç¹ûÒÑ±àÒë)
+        // m_RenderGraph->Execute(*cmdList);
 
-        // æ¸²æŸ“ImGui
-        m_ImGuiRenderer->Render(m_CommandList->GetCommandList());
+        // äÖÈ¾ImGui
+        m_ImGuiRenderer->Render(cmdList->GetCommandList());
 
-        // è½¬æ¢åç¼“å†²åˆ°å‘ˆç°çŠ¶æ€
-        m_CommandList->TransitionBarrier(
+        // ×ª»»ºó»º³åµ½³ÊÏÖ×´Ì¬
+        cmdList->TransitionBarrier(
             m_SwapChain->GetCurrentBackBuffer(),
             ResourceState::RenderTarget,
             ResourceState::Present
         );
 
-        // å…³é—­å¹¶æ‰§è¡Œå‘½ä»¤åˆ—è¡¨
-        m_CommandList->Close();
-        m_GraphicsQueue->ExecuteCommandList(m_CommandList.get());
+        // ¹Ø±Õ²¢Ö´ĞĞÃüÁîÁĞ±í
+        cmdList->Close();
+        m_GraphicsQueue->ExecuteCommandList(cmdList.get());
 
-        // å‘ˆç°
+        // ³ÊÏÖ
         m_SwapChain->Present();
 
-        // å‘é€fenceä¿¡å·
+        // ·¢ËÍfenceĞÅºÅ
         m_FrameFenceValues[m_FrameIndex] = m_GraphicsQueue->Signal();
     }
 
@@ -194,63 +213,76 @@ namespace Sea
 
     void SampleApp::SetupRenderGraph()
     {
-        // åˆ›å»ºä¸€äº›é»˜è®¤çš„Passä½œä¸ºç¤ºä¾‹
-        
+        // ³õÊ¼»¯RenderGraph
+        m_RenderGraph->Initialize(m_Device.get());
+
+        // ´´½¨GBuffer×ÊÔ´
+        u32 albedoId = m_RenderGraph->CreateResource("Albedo", ResourceNodeType::Texture2D);
+        if (auto* albedo = m_RenderGraph->GetResource(albedoId))
+        {
+            albedo->SetDimensions(1920, 1080);
+            albedo->SetFormat(Format::R8G8B8A8_UNORM);
+            albedo->SetPosition(50, 50);
+        }
+
+        u32 normalId = m_RenderGraph->CreateResource("Normal", ResourceNodeType::Texture2D);
+        if (auto* normal = m_RenderGraph->GetResource(normalId))
+        {
+            normal->SetDimensions(1920, 1080);
+            normal->SetFormat(Format::R16G16B16A16_FLOAT);
+            normal->SetPosition(50, 150);
+        }
+
+        u32 hdrId = m_RenderGraph->CreateResource("HDR Color", ResourceNodeType::Texture2D);
+        if (auto* hdr = m_RenderGraph->GetResource(hdrId))
+        {
+            hdr->SetDimensions(1920, 1080);
+            hdr->SetFormat(Format::R16G16B16A16_FLOAT);
+            hdr->SetPosition(350, 100);
+        }
+
+        u32 ldrId = m_RenderGraph->CreateResource("LDR Output", ResourceNodeType::Texture2D);
+        if (auto* ldr = m_RenderGraph->GetResource(ldrId))
+        {
+            ldr->SetDimensions(1920, 1080);
+            ldr->SetFormat(Format::R8G8B8A8_UNORM);
+            ldr->SetPosition(650, 100);
+        }
+
         // GBuffer Pass
-        RenderPassDesc gbufferPass;
-        gbufferPass.name = "GBuffer Pass";
-        gbufferPass.type = PassType::Graphics;
-        gbufferPass.nodeX = 100; gbufferPass.nodeY = 100;
-        
-        // åˆ›å»ºGBufferèµ„æº
-        RGResourceDesc albedoDesc;
-        albedoDesc.name = "Albedo";
-        albedoDesc.width = 1920; albedoDesc.height = 1080;
-        albedoDesc.format = Format::R8G8B8A8_UNORM;
-        auto albedo = m_RenderGraph->CreateResource(albedoDesc);
-        gbufferPass.outputs.push_back(albedo);
-
-        RGResourceDesc normalDesc;
-        normalDesc.name = "Normal";
-        normalDesc.width = 1920; normalDesc.height = 1080;
-        normalDesc.format = Format::R16G16B16A16_FLOAT;
-        auto normal = m_RenderGraph->CreateResource(normalDesc);
-        gbufferPass.outputs.push_back(normal);
-
-        m_RenderGraph->AddPass(gbufferPass);
+        u32 gbufferId = m_RenderGraph->AddPass("GBuffer Pass", PassType::Graphics);
+        if (auto* gbuffer = m_RenderGraph->GetPass(gbufferId))
+        {
+            gbuffer->AddOutput("Albedo");
+            gbuffer->AddOutput("Normal");
+            gbuffer->SetOutput(0, albedoId);
+            gbuffer->SetOutput(1, normalId);
+            gbuffer->SetPosition(200, 100);
+        }
 
         // Lighting Pass
-        RenderPassDesc lightingPass;
-        lightingPass.name = "Lighting Pass";
-        lightingPass.type = PassType::Graphics;
-        lightingPass.nodeX = 400; lightingPass.nodeY = 100;
-        lightingPass.inputs.push_back(albedo);
-        lightingPass.inputs.push_back(normal);
-
-        RGResourceDesc hdrDesc;
-        hdrDesc.name = "HDR Color";
-        hdrDesc.width = 1920; hdrDesc.height = 1080;
-        hdrDesc.format = Format::R16G16B16A16_FLOAT;
-        auto hdr = m_RenderGraph->CreateResource(hdrDesc);
-        lightingPass.outputs.push_back(hdr);
-
-        m_RenderGraph->AddPass(lightingPass);
+        u32 lightingId = m_RenderGraph->AddPass("Lighting Pass", PassType::Graphics);
+        if (auto* lighting = m_RenderGraph->GetPass(lightingId))
+        {
+            lighting->AddInput("Albedo");
+            lighting->AddInput("Normal");
+            lighting->AddOutput("HDR");
+            lighting->SetInput(0, albedoId);
+            lighting->SetInput(1, normalId);
+            lighting->SetOutput(0, hdrId);
+            lighting->SetPosition(450, 100);
+        }
 
         // Tonemap Pass
-        RenderPassDesc tonemapPass;
-        tonemapPass.name = "Tonemap";
-        tonemapPass.type = PassType::Graphics;
-        tonemapPass.nodeX = 700; tonemapPass.nodeY = 100;
-        tonemapPass.inputs.push_back(hdr);
-
-        RGResourceDesc ldrDesc;
-        ldrDesc.name = "LDR Output";
-        ldrDesc.width = 1920; ldrDesc.height = 1080;
-        ldrDesc.format = Format::R8G8B8A8_UNORM;
-        auto ldr = m_RenderGraph->CreateResource(ldrDesc);
-        tonemapPass.outputs.push_back(ldr);
-
-        m_RenderGraph->AddPass(tonemapPass);
+        u32 tonemapId = m_RenderGraph->AddPass("Tonemap", PassType::Graphics);
+        if (auto* tonemap = m_RenderGraph->GetPass(tonemapId))
+        {
+            tonemap->AddInput("HDR");
+            tonemap->AddOutput("LDR");
+            tonemap->SetInput(0, hdrId);
+            tonemap->SetOutput(0, ldrId);
+            tonemap->SetPosition(700, 100);
+        }
 
         m_RenderGraph->Compile();
         SEA_CORE_INFO("Default render graph created with {} passes", m_RenderGraph->GetPasses().size());
@@ -258,6 +290,6 @@ namespace Sea
 
     void SampleApp::CreateResources()
     {
-        // åˆ›å»ºå…¶ä»–GPUèµ„æº...
+        // ´´½¨ÆäËûGPU×ÊÔ´...
     }
 }

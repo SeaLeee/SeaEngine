@@ -1,11 +1,9 @@
 #pragma once
 #include "Core/Types.h"
-#include "RenderGraph/RenderPass.h"
+#include "RenderGraph/RenderGraph.h"
 
 namespace Sea
 {
-    class RenderGraph;
-
     class PropertyPanel
     {
     public:
@@ -15,8 +13,8 @@ namespace Sea
         void SetSelectedResource(u32 resId) { m_SelectedResource = resId; }
 
     private:
-        void RenderPassProperties(RenderPassDesc& pass);
-        void RenderResourceProperties(RGResourceDesc& res);
+        void RenderPassProperties(PassNode& pass);
+        void RenderResourceProperties(ResourceNode& res);
 
         RenderGraph& m_Graph;
         u32 m_SelectedPass = UINT32_MAX;

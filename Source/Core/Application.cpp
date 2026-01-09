@@ -72,6 +72,7 @@ namespace Sea
 
     void Application::MainLoop()
     {
+        SEA_CORE_INFO("Entering main loop, m_Running={}", m_Running);
         Timer timer;
         timer.Reset();
 
@@ -84,6 +85,7 @@ namespace Sea
 
             if (m_Window->ShouldClose())
             {
+                SEA_CORE_INFO("Window should close");
                 m_Running = false;
                 break;
             }
@@ -94,5 +96,6 @@ namespace Sea
                 OnRender();
             }
         }
+        SEA_CORE_INFO("Exiting main loop");
     }
 }

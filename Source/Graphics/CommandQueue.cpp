@@ -50,7 +50,10 @@ namespace Sea
 
     void CommandQueue::Shutdown()
     {
-        WaitForIdle();
+        if (m_Queue && m_Fence && m_FenceEvent)
+        {
+            WaitForIdle();
+        }
 
         if (m_FenceEvent)
         {

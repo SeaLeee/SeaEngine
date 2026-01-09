@@ -1,11 +1,14 @@
 #include "Graphics/SwapChain.h"
 #include "Graphics/Device.h"
+#include "Graphics/CommandQueue.h"
+#include "Graphics/d3dx12.h"
 #include "Core/Log.h"
 
 namespace Sea
 {
-    SwapChain::SwapChain(Device& device, const SwapChainDesc& desc)
+    SwapChain::SwapChain(Device& device, CommandQueue& queue, const SwapChainDesc& desc)
         : m_Device(device)
+        , m_Queue(queue)
         , m_Hwnd(desc.hwnd)
         , m_Width(desc.width)
         , m_Height(desc.height)
@@ -70,22 +73,9 @@ namespace Sea
         swapChainDesc.AlphaMode = DXGI_ALPHA_MODE_UNSPECIFIED;
         swapChainDesc.Flags = m_TearingSupported ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0;
 
-        // 需要一个命令队列来创建交换链,暂时创建一个临时的
-        ComPtr<ID3D12CommandQueue> tempQueue;
-        D3D12_COMMAND_QUEUE_DESC queueDesc = {};
-        queueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
-        queueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
-        
-        HRESULT hr = m_Device.GetDevice()->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&tempQueue));
-        if (FAILED(hr))
-        {
-            SEA_CORE_ERROR("Failed to create temporary command queue for swap chain");
-            return false;
-        }
-
         ComPtr<IDXGISwapChain1> swapChain1;
-        hr = m_Device.GetFactory()->CreateSwapChainForHwnd(
-            tempQueue.Get(),
+        HRESULT hr = m_Device.GetFactory()->CreateSwapChainForHwnd(
+            m_Queue.GetQueue(),
             m_Hwnd,
             &swapChainDesc,
             nullptr,

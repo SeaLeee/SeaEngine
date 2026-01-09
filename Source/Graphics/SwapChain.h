@@ -6,6 +6,7 @@
 namespace Sea
 {
     class Device;
+    class CommandQueue;
 
     struct SwapChainDesc
     {
@@ -21,7 +22,7 @@ namespace Sea
     class SwapChain : public NonCopyable
     {
     public:
-        SwapChain(Device& device, const SwapChainDesc& desc);
+        SwapChain(Device& device, CommandQueue& queue, const SwapChainDesc& desc);
         ~SwapChain();
 
         bool Initialize();
@@ -48,6 +49,7 @@ namespace Sea
 
     private:
         Device& m_Device;
+        CommandQueue& m_Queue;
         
         ComPtr<IDXGISwapChain4> m_SwapChain;
         ComPtr<ID3D12DescriptorHeap> m_RTVHeap;

@@ -35,21 +35,27 @@ endif()
 # 获取第三方依赖
 include(FetchContent)
 
-# ImGui
+# ImGui (使用docking分支)
 FetchContent_Declare(
     imgui
     GIT_REPOSITORY https://github.com/ocornut/imgui.git
-    GIT_TAG v1.90.1
+    GIT_TAG v1.91.6-docking
 )
-FetchContent_MakeAvailable(imgui)
+FetchContent_GetProperties(imgui)
+if(NOT imgui_POPULATED)
+    FetchContent_Populate(imgui)
+endif()
 
-# ImNodes - 节点编辑器
+# ImNodes - 节点编辑器 (只获取源码，不使用其CMakeLists)
 FetchContent_Declare(
     imnodes
     GIT_REPOSITORY https://github.com/Nelarius/imnodes.git
-    GIT_TAG v0.5
+    GIT_TAG master
 )
-FetchContent_MakeAvailable(imnodes)
+FetchContent_GetProperties(imnodes)
+if(NOT imnodes_POPULATED)
+    FetchContent_Populate(imnodes)
+endif()
 
 # spdlog - 日志
 FetchContent_Declare(
@@ -81,6 +87,7 @@ target_include_directories(imgui_lib PUBLIC
     ${imgui_SOURCE_DIR}
     ${imgui_SOURCE_DIR}/backends
 )
+target_compile_definitions(imgui_lib PUBLIC IMGUI_DEFINE_MATH_OPERATORS)
 target_link_libraries(imgui_lib PUBLIC d3d12 dxgi)
 
 # ImNodes库
@@ -88,6 +95,7 @@ add_library(imnodes_lib STATIC
     ${imnodes_SOURCE_DIR}/imnodes.cpp
 )
 target_include_directories(imnodes_lib PUBLIC ${imnodes_SOURCE_DIR})
+target_compile_definitions(imnodes_lib PUBLIC IMGUI_DEFINE_MATH_OPERATORS)
 target_link_libraries(imnodes_lib PUBLIC imgui_lib)
 
 # 子目录

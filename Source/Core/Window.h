@@ -41,6 +41,8 @@ namespace Sea
 
         void SetTitle(const std::string& title);
         void Resize(u32 width, u32 height);
+        void SetImGuiReady(bool ready) { m_ImGuiReady = ready; }
+        bool IsImGuiReady() const { return m_ImGuiReady; }
 
     private:
         static LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
@@ -56,6 +58,7 @@ namespace Sea
         bool m_Fullscreen = false;
         bool m_ShouldClose = false;
         bool m_Minimized = false;
+        bool m_ImGuiReady = false;
 
         ResizeCallback m_ResizeCallback;
         CloseCallback m_CloseCallback;

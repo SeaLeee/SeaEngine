@@ -1,12 +1,10 @@
 #pragma once
 #include "Core/Types.h"
-#include "RenderGraph/RenderPass.h"
+#include "RenderGraph/RenderGraph.h"
 #include <imnodes.h>
 
 namespace Sea
 {
-    class RenderGraph;
-
     // 核心节点编辑器 - 类似Falcor的可视化管线编辑
     class NodeEditor : public NonCopyable
     {
@@ -20,7 +18,7 @@ namespace Sea
 
         // 节点操作
         void AddPassNode(const std::string& name, PassType type);
-        void AddResourceNode(const std::string& name, const RGResourceDesc& desc);
+        void AddResourceNode(const std::string& name, ResourceNodeType type);
         void DeleteSelectedNodes();
         void ClearAll();
 

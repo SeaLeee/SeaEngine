@@ -1,7 +1,15 @@
+#ifndef UNICODE
+#define UNICODE
+#endif
+#ifndef _UNICODE
+#define _UNICODE
+#endif
+
 #include "Core/Window.h"
 #include "Core/Log.h"
 
-extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+// Forward declare ImGui Win32 handler (from imgui_impl_win32.h)
+extern LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
 namespace Sea
 {
@@ -90,7 +98,7 @@ namespace Sea
             DestroyWindow(m_Handle);
             m_Handle = nullptr;
         }
-        UnregisterClass(L"SeaEngineWindowClass", m_Instance);
+        UnregisterClassW(L"SeaEngineWindowClass", m_Instance);
     }
 
     void Window::ProcessMessages()
@@ -111,7 +119,7 @@ namespace Sea
     {
         m_Title = title;
         std::wstring wTitle(title.begin(), title.end());
-        SetWindowText(m_Handle, wTitle.c_str());
+        SetWindowTextW(m_Handle, wTitle.c_str());
     }
 
     void Window::Resize(u32 width, u32 height)
@@ -135,10 +143,13 @@ namespace Sea
             window = reinterpret_cast<Window*>(GetWindowLongPtr(hwnd, GWLP_USERDATA));
         }
 
-        // ImGui消息处理
-        if (ImGui_ImplWin32_WndProcHandler(hwnd, msg, wParam, lParam))
+        // ImGui消息处理 - 只有在ImGui初始化后才调用
+        if (window && window->IsImGuiReady())
         {
-            return true;
+            if (ImGui_ImplWin32_WndProcHandler(hwnd, msg, wParam, lParam))
+            {
+                return true;
+            }
         }
 
         if (window)

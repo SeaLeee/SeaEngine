@@ -1,5 +1,4 @@
 #include "Editor/NodeEditor.h"
-#include "RenderGraph/RenderPass.h"
 #include "Core/Log.h"
 #include "Core/FileSystem.h"
 #include <imgui.h>
@@ -48,7 +47,7 @@ namespace Sea
                 if (ImGui::MenuItem("Add Pass Node"))
                     AddPassNode("NewPass", PassType::Graphics);
                 if (ImGui::MenuItem("Add Resource Node"))
-                    AddResourceNode("NewResource", {});
+                    AddResourceNode("NewResource", ResourceNodeType::Texture2D);
                 ImGui::Separator();
                 if (ImGui::MenuItem("Compile Graph"))
                     m_Graph.Compile();
@@ -85,52 +84,48 @@ namespace Sea
     void NodeEditor::RenderNodes()
     {
         // 渲染Pass节点
-        for (size_t i = 0; i < m_Graph.GetPasses().size(); ++i)
+        for (auto& pass : m_Graph.GetPasses())
         {
-            auto& pass = m_Graph.GetPasses()[i];
-            int nodeId = static_cast<int>(i + 1);
+            int nodeId = static_cast<int>(pass.GetId() + 1);
 
             // 设置节点位置
-            if (pass.nodeX != 0 || pass.nodeY != 0)
-                ImNodes::SetNodeGridSpacePos(nodeId, ImVec2(pass.nodeX, pass.nodeY));
+            if (pass.GetPosX() != 0 || pass.GetPosY() != 0)
+                ImNodes::SetNodeGridSpacePos(nodeId, ImVec2(pass.GetPosX(), pass.GetPosY()));
 
             // 根据Pass类型设置颜色
-            ImU32 titleColor;
-            switch (pass.type)
+            ImU32 titleColor = IM_COL32(80, 120, 200, 255);
+            switch (pass.GetType())
             {
-                case PassType::Graphics: titleColor = IM_COL32(80, 120, 200, 255); break;
-                case PassType::Compute:  titleColor = IM_COL32(200, 120, 80, 255); break;
-                case PassType::Copy:     titleColor = IM_COL32(120, 200, 80, 255); break;
+                case PassType::Graphics:     titleColor = IM_COL32(80, 120, 200, 255); break;
+                case PassType::Compute:      titleColor = IM_COL32(200, 120, 80, 255); break;
+                case PassType::Copy:         titleColor = IM_COL32(120, 200, 80, 255); break;
+                case PassType::AsyncCompute: titleColor = IM_COL32(200, 80, 200, 255); break;
             }
             ImNodes::PushColorStyle(ImNodesCol_TitleBar, titleColor);
 
             ImNodes::BeginNode(nodeId);
             
             ImNodes::BeginNodeTitleBar();
-            ImGui::TextUnformatted(pass.name.c_str());
+            ImGui::TextUnformatted(pass.GetName().c_str());
             ImNodes::EndNodeTitleBar();
 
             // 输入引脚
-            for (size_t j = 0; j < pass.inputs.size(); ++j)
+            const auto& inputs = pass.GetInputs();
+            for (size_t j = 0; j < inputs.size(); ++j)
             {
                 int pinId = nodeId * 100 + static_cast<int>(j);
                 ImNodes::BeginInputAttribute(pinId);
-                ImGui::Text("In %zu", j);
+                ImGui::Text("%s", inputs[j].name.c_str());
                 ImNodes::EndInputAttribute();
             }
 
-            // 添加空输入槽
-            int emptyInputPin = nodeId * 100 + static_cast<int>(pass.inputs.size());
-            ImNodes::BeginInputAttribute(emptyInputPin);
-            ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "+ Input");
-            ImNodes::EndInputAttribute();
-
             // 输出引脚
-            for (size_t j = 0; j < pass.outputs.size(); ++j)
+            const auto& outputs = pass.GetOutputs();
+            for (size_t j = 0; j < outputs.size(); ++j)
             {
                 int pinId = nodeId * 100 + 50 + static_cast<int>(j);
                 ImNodes::BeginOutputAttribute(pinId);
-                ImGui::Text("Out %zu", j);
+                ImGui::Text("%s", outputs[j].name.c_str());
                 ImNodes::EndOutputAttribute();
             }
 
@@ -139,40 +134,67 @@ namespace Sea
 
             // 保存节点位置
             ImVec2 pos = ImNodes::GetNodeGridSpacePos(nodeId);
-            pass.nodeX = pos.x;
-            pass.nodeY = pos.y;
+            pass.SetPosition(pos.x, pos.y);
         }
 
         // 渲染资源节点
-        for (size_t i = 0; i < m_Graph.GetResources().size(); ++i)
+        for (auto& res : m_Graph.GetResources())
         {
-            auto& res = m_Graph.GetResources()[i];
-            int nodeId = 1000 + static_cast<int>(i);
+            int nodeId = 1000 + static_cast<int>(res.GetId());
 
-            ImNodes::PushColorStyle(ImNodesCol_TitleBar, IM_COL32(150, 80, 150, 255));
+            if (res.GetPosX() != 0 || res.GetPosY() != 0)
+                ImNodes::SetNodeGridSpacePos(nodeId, ImVec2(res.GetPosX(), res.GetPosY()));
+
+            // 资源节点使用绿色系
+            ImU32 titleColor = res.IsExternal() ? IM_COL32(200, 150, 50, 255) : IM_COL32(50, 150, 100, 255);
+            ImNodes::PushColorStyle(ImNodesCol_TitleBar, titleColor);
+
             ImNodes::BeginNode(nodeId);
             
             ImNodes::BeginNodeTitleBar();
-            ImGui::Text("[R] %s", res.name.c_str());
+            ImGui::TextUnformatted(res.GetName().c_str());
             ImNodes::EndNodeTitleBar();
 
-            ImGui::Text("%ux%u", res.width, res.height);
+            // 资源信息
+            ImGui::Text("%s", ResourceNode::GetTypeString(res.GetType()));
+            if (res.GetWidth() > 0 && res.GetHeight() > 0)
+            {
+                ImGui::Text("%ux%u", res.GetWidth(), res.GetHeight());
+            }
 
-            int pinId = nodeId * 100;
-            ImNodes::BeginOutputAttribute(pinId);
-            ImGui::Text("Resource");
+            // 输出属性（资源可以被读取）
+            int outPinId = nodeId * 100;
+            ImNodes::BeginOutputAttribute(outPinId);
+            ImGui::Text("→");
             ImNodes::EndOutputAttribute();
 
             ImNodes::EndNode();
             ImNodes::PopColorStyle();
+
+            // 保存节点位置
+            ImVec2 pos = ImNodes::GetNodeGridSpacePos(nodeId);
+            res.SetPosition(pos.x, pos.y);
         }
     }
 
     void NodeEditor::RenderLinks()
     {
-        for (const auto& link : m_Links)
+        int linkId = 0;
+        for (const auto& pass : m_Graph.GetPasses())
         {
-            ImNodes::Link(link.linkId, link.startPin, link.endPin);
+            int nodeId = static_cast<int>(pass.GetId() + 1);
+            const auto& inputs = pass.GetInputs();
+            
+            for (size_t i = 0; i < inputs.size(); ++i)
+            {
+                if (inputs[i].IsConnected())
+                {
+                    int endPin = nodeId * 100 + static_cast<int>(i);
+                    // 找到输出这个资源的节点
+                    int startPin = (1000 + static_cast<int>(inputs[i].resourceId)) * 100;
+                    ImNodes::Link(linkId++, startPin, endPin);
+                }
+            }
         }
     }
 
@@ -181,13 +203,24 @@ namespace Sea
         int startPin, endPin;
         if (ImNodes::IsLinkCreated(&startPin, &endPin))
         {
-            LinkInfo link;
-            link.linkId = GetNextLinkId();
-            link.startPin = startPin;
-            link.endPin = endPin;
-            m_Links.push_back(link);
+            // 解析pin ID
+            int startNodeId = startPin / 100;
+            int endNodeId = endPin / 100;
+            int inputSlot = endPin % 100;
 
-            SEA_CORE_INFO("Link created: {} -> {}", startPin, endPin);
+            // 连接资源到Pass输入
+            if (startNodeId >= 1000) // 资源节点
+            {
+                u32 resourceId = static_cast<u32>(startNodeId - 1000);
+                u32 passId = static_cast<u32>(endNodeId - 1);
+                
+                PassNode* pass = m_Graph.GetPass(passId);
+                if (pass && inputSlot < static_cast<int>(pass->GetInputs().size()))
+                {
+                    pass->SetInput(static_cast<u32>(inputSlot), resourceId);
+                    m_Graph.MarkDirty();
+                }
+            }
         }
     }
 
@@ -196,16 +229,14 @@ namespace Sea
         int linkId;
         if (ImNodes::IsLinkDestroyed(&linkId))
         {
-            auto it = std::find_if(m_Links.begin(), m_Links.end(),
-                [linkId](const LinkInfo& l) { return l.linkId == linkId; });
-            if (it != m_Links.end())
-                m_Links.erase(it);
+            // 简单处理：重新编译图
+            m_Graph.MarkDirty();
         }
     }
 
     void NodeEditor::RenderContextMenu()
     {
-        if (ImGui::IsMouseClicked(ImGuiMouseButton_Right) && ImNodes::IsEditorHovered())
+        if (ImGui::IsMouseClicked(ImGuiMouseButton_Right) && ImGui::IsWindowHovered())
         {
             m_ShowContextMenu = true;
             m_ContextMenuPos = ImGui::GetMousePos();
@@ -216,76 +247,56 @@ namespace Sea
             ImGui::SetNextWindowPos(m_ContextMenuPos);
             if (ImGui::BeginPopup("NodeContextMenu"))
             {
-                if (ImGui::BeginMenu("Add Pass"))
-                {
-                    if (ImGui::MenuItem("Graphics Pass"))
-                        AddPassNode("GraphicsPass", PassType::Graphics);
-                    if (ImGui::MenuItem("Compute Pass"))
-                        AddPassNode("ComputePass", PassType::Compute);
-                    if (ImGui::MenuItem("Copy Pass"))
-                        AddPassNode("CopyPass", PassType::Copy);
-                    ImGui::EndMenu();
-                }
-                if (ImGui::BeginMenu("Add Resource"))
-                {
-                    if (ImGui::MenuItem("Render Target"))
-                    {
-                        RGResourceDesc desc;
-                        desc.name = "RenderTarget";
-                        desc.width = 1920; desc.height = 1080;
-                        desc.usage = TextureUsage::RenderTarget | TextureUsage::ShaderResource;
-                        AddResourceNode("RenderTarget", desc);
-                    }
-                    if (ImGui::MenuItem("Depth Buffer"))
-                    {
-                        RGResourceDesc desc;
-                        desc.name = "DepthBuffer";
-                        desc.width = 1920; desc.height = 1080;
-                        desc.format = Format::D32_FLOAT;
-                        desc.usage = TextureUsage::DepthStencil;
-                        AddResourceNode("DepthBuffer", desc);
-                    }
-                    ImGui::EndMenu();
-                }
+                if (ImGui::MenuItem("Add Graphics Pass"))
+                    AddPassNode("Graphics Pass", PassType::Graphics);
+                if (ImGui::MenuItem("Add Compute Pass"))
+                    AddPassNode("Compute Pass", PassType::Compute);
+                if (ImGui::MenuItem("Add Copy Pass"))
+                    AddPassNode("Copy Pass", PassType::Copy);
                 ImGui::Separator();
-                if (ImGui::MenuItem("Delete Selected"))
-                    DeleteSelectedNodes();
+                if (ImGui::MenuItem("Add Texture2D"))
+                    AddResourceNode("Texture2D", ResourceNodeType::Texture2D);
+                if (ImGui::MenuItem("Add DepthStencil"))
+                    AddResourceNode("Depth", ResourceNodeType::DepthStencil);
+                if (ImGui::MenuItem("Add Buffer"))
+                    AddResourceNode("Buffer", ResourceNodeType::Buffer);
+
                 ImGui::EndPopup();
             }
             else
             {
                 ImGui::OpenPopup("NodeContextMenu");
             }
+
+            if (!ImGui::IsPopupOpen("NodeContextMenu"))
+                m_ShowContextMenu = false;
         }
     }
 
     void NodeEditor::AddPassNode(const std::string& name, PassType type)
     {
-        RenderPassDesc desc;
-        desc.name = name;
-        desc.type = type;
-        desc.nodeX = m_ContextMenuPos.x;
-        desc.nodeY = m_ContextMenuPos.y;
-        
-        // 默认添加一个输出
-        RGResourceHandle output;
-        output.id = static_cast<u32>(m_Graph.GetResources().size());
-        
-        RGResourceDesc resDesc;
-        resDesc.name = name + "_Output";
-        resDesc.width = 1920; resDesc.height = 1080;
-        m_Graph.CreateResource(resDesc);
-        desc.outputs.push_back(output);
-
-        m_Graph.AddPass(desc);
+        u32 passId = m_Graph.AddPass(name, type);
+        PassNode* pass = m_Graph.GetPass(passId);
+        if (pass)
+        {
+            pass->SetPosition(m_ContextMenuPos.x, m_ContextMenuPos.y);
+            // 添加默认输入输出
+            pass->AddInput("Input", false);
+            pass->AddOutput("Output");
+        }
         SEA_CORE_INFO("Added pass node: {}", name);
     }
 
-    void NodeEditor::AddResourceNode(const std::string& name, const RGResourceDesc& desc)
+    void NodeEditor::AddResourceNode(const std::string& name, ResourceNodeType type)
     {
-        RGResourceDesc resDesc = desc;
-        resDesc.name = name;
-        m_Graph.CreateResource(resDesc);
+        u32 resId = m_Graph.CreateResource(name, type);
+        ResourceNode* res = m_Graph.GetResource(resId);
+        if (res)
+        {
+            res->SetPosition(m_ContextMenuPos.x, m_ContextMenuPos.y);
+            res->SetDimensions(1920, 1080);
+            res->SetFormat(Format::R8G8B8A8_UNORM);
+        }
         SEA_CORE_INFO("Added resource node: {}", name);
     }
 
@@ -294,35 +305,35 @@ namespace Sea
         int numSelected = ImNodes::NumSelectedNodes();
         if (numSelected > 0)
         {
-            std::vector<int> selected(numSelected);
-            ImNodes::GetSelectedNodes(selected.data());
-            // 删除逻辑...
+            std::vector<int> selectedNodes(numSelected);
+            ImNodes::GetSelectedNodes(selectedNodes.data());
+
+            for (int nodeId : selectedNodes)
+            {
+                if (nodeId < 1000)
+                {
+                    m_Graph.RemovePass(static_cast<u32>(nodeId - 1));
+                }
+                // 资源节点通常不删除，因为可能被引用
+            }
         }
     }
 
     void NodeEditor::ClearAll()
     {
-        m_Graph.GetPasses().clear();
-        m_Graph.GetResources().clear();
-        m_Links.clear();
+        m_Graph.Clear();
         m_Nodes.clear();
+        m_Links.clear();
+        SEA_CORE_INFO("Cleared all nodes");
     }
 
     void NodeEditor::SaveToFile(const std::string& path)
     {
-        auto json = m_Graph.Serialize();
-        FileSystem::WriteTextFile(path, json.dump(2));
-        SEA_CORE_INFO("Graph saved to: {}", path);
+        m_Graph.SaveToFile(path);
     }
 
     void NodeEditor::LoadFromFile(const std::string& path)
     {
-        std::string content = FileSystem::ReadTextFile(path);
-        if (!content.empty())
-        {
-            auto json = nlohmann::json::parse(content);
-            m_Graph.Deserialize(json);
-            SEA_CORE_INFO("Graph loaded from: {}", path);
-        }
+        m_Graph.LoadFromFile(path);
     }
 }

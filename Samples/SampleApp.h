@@ -27,7 +27,7 @@ namespace Sea
         Scope<Device> m_Device;
         Scope<SwapChain> m_SwapChain;
         Scope<CommandQueue> m_GraphicsQueue;
-        Scope<CommandList> m_CommandList;
+        std::vector<Scope<CommandList>> m_CommandLists;
         Scope<ImGuiRenderer> m_ImGuiRenderer;
         Scope<RenderGraph> m_RenderGraph;
         Scope<NodeEditor> m_NodeEditor;
@@ -35,7 +35,7 @@ namespace Sea
         Scope<ShaderEditor> m_ShaderEditor;
         Scope<ShaderLibrary> m_ShaderLibrary;
 
-        // 帧同步
+        // ֡ͬ��
         std::vector<u64> m_FrameFenceValues;
         u32 m_FrameIndex = 0;
     };
