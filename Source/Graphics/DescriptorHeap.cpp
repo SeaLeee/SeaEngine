@@ -7,6 +7,14 @@ namespace Sea
     DescriptorHeap::DescriptorHeap(Device& device, const DescriptorHeapDesc& desc)
         : m_Device(device), m_Desc(desc) {}
 
+    DescriptorHeap::DescriptorHeap(Device& device, const D3D12_DESCRIPTOR_HEAP_DESC& d3dDesc)
+        : m_Device(device)
+    {
+        m_Desc.type = static_cast<DescriptorHeapType>(d3dDesc.Type);
+        m_Desc.numDescriptors = d3dDesc.NumDescriptors;
+        m_Desc.shaderVisible = (d3dDesc.Flags & D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE) != 0;
+    }
+
     DescriptorHeap::~DescriptorHeap() { m_Heap.Reset(); }
 
     bool DescriptorHeap::Initialize()
@@ -25,6 +33,20 @@ namespace Sea
         m_DescriptorSize = m_Device.GetDevice()->GetDescriptorHandleIncrementSize(heapDesc.Type);
         m_NumFreeDescriptors = m_Desc.numDescriptors;
         return true;
+    }
+
+    D3D12_CPU_DESCRIPTOR_HANDLE DescriptorHeap::GetCPUHandle(u32 index) const
+    {
+        D3D12_CPU_DESCRIPTOR_HANDLE handle = m_Heap->GetCPUDescriptorHandleForHeapStart();
+        handle.ptr += index * m_DescriptorSize;
+        return handle;
+    }
+
+    D3D12_GPU_DESCRIPTOR_HANDLE DescriptorHeap::GetGPUHandle(u32 index) const
+    {
+        D3D12_GPU_DESCRIPTOR_HANDLE handle = m_Heap->GetGPUDescriptorHandleForHeapStart();
+        handle.ptr += index * m_DescriptorSize;
+        return handle;
     }
 
     DescriptorHandle DescriptorHeap::Allocate()

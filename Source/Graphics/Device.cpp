@@ -195,6 +195,14 @@ namespace Sea
         const D3D12_CLEAR_VALUE* clearValue)
     {
         ComPtr<ID3D12Resource> resource;
+        
+        SEA_CORE_INFO("CreateCommittedResource: Dim={}, {}x{}x{}, Format={}, Flags={}, State={}",
+            static_cast<int>(resourceDesc.Dimension),
+            resourceDesc.Width, resourceDesc.Height, resourceDesc.DepthOrArraySize,
+            static_cast<int>(resourceDesc.Format),
+            static_cast<int>(resourceDesc.Flags),
+            static_cast<int>(initialState));
+        
         HRESULT hr = m_Device->CreateCommittedResource(
             &heapProps,
             heapFlags,
@@ -206,7 +214,7 @@ namespace Sea
 
         if (FAILED(hr))
         {
-            SEA_CORE_ERROR("Failed to create committed resource");
+            SEA_CORE_ERROR("Failed to create committed resource, HRESULT: 0x{:08X}", static_cast<unsigned int>(hr));
             return nullptr;
         }
 
@@ -215,18 +223,10 @@ namespace Sea
 
     void Device::WaitForIdle()
     {
-        // 创建临时fence等待GPU完成所有工作
-        ComPtr<ID3D12Fence> fence;
-        if (SUCCEEDED(m_Device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence))))
-        {
-            HANDLE event = CreateEvent(nullptr, FALSE, FALSE, nullptr);
-            if (event)
-            {
-                // 这里需要一个命令队列来发信号,在实际使用中应该传入
-                fence->SetEventOnCompletion(1, event);
-                WaitForSingleObject(event, INFINITE);
-                CloseHandle(event);
-            }
-        }
+        // 注意: 这个方法不能正确等待GPU空闲，因为没有命令队列来发送fence信号
+        // 实际的GPU同步应该通过CommandQueue::WaitForIdle()来完成
+        // 这里只是一个占位实现，避免崩溃
+        if (!m_Device)
+            return;
     }
 }

@@ -73,6 +73,33 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(json)
 
+# tinyobjloader - OBJ模型加载
+FetchContent_Declare(
+    tinyobjloader
+    GIT_REPOSITORY https://github.com/tinyobjloader/tinyobjloader.git
+    GIT_TAG v2.0.0rc13
+)
+FetchContent_MakeAvailable(tinyobjloader)
+
+# stb - 图像加载
+FetchContent_Declare(
+    stb
+    GIT_REPOSITORY https://github.com/nothings/stb.git
+    GIT_TAG master
+)
+FetchContent_GetProperties(stb)
+if(NOT stb_POPULATED)
+    FetchContent_Populate(stb)
+endif()
+
+# DirectXMath
+FetchContent_Declare(
+    directxmath
+    GIT_REPOSITORY https://github.com/microsoft/DirectXMath.git
+    GIT_TAG dec2023
+)
+FetchContent_MakeAvailable(directxmath)
+
 # ImGui库
 add_library(imgui_lib STATIC
     ${imgui_SOURCE_DIR}/imgui.cpp
@@ -103,6 +130,7 @@ add_subdirectory(Source/Core)
 add_subdirectory(Source/Graphics)
 add_subdirectory(Source/RenderGraph)
 add_subdirectory(Source/Shader)
+add_subdirectory(Source/Scene)
 add_subdirectory(Source/Editor)
 
 if(SEA_BUILD_SAMPLES)
@@ -116,5 +144,6 @@ target_link_libraries(SeaEngine INTERFACE
     SeaGraphics
     SeaRenderGraph
     SeaShader
+    SeaScene
     SeaEditor
 )

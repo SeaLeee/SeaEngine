@@ -10,16 +10,16 @@
 namespace Sea
 {
     ImGuiRenderer::ImGuiRenderer(Device& device, Window& window)
-        : m_Device(device), m_Window(window) {}
+        : m_Device(device), m_Window(window) {
+    }
 
     ImGuiRenderer::~ImGuiRenderer() { Shutdown(); }
 
     bool ImGuiRenderer::Initialize(u32 numFrames, Format rtvFormat)
     {
-        // 创建SRV描述符堆
         D3D12_DESCRIPTOR_HEAP_DESC heapDesc = {};
         heapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-        heapDesc.NumDescriptors = 1;
+        heapDesc.NumDescriptors = MAX_DESCRIPTORS;
         heapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
 
         if (FAILED(m_Device.GetDevice()->CreateDescriptorHeap(&heapDesc, IID_PPV_ARGS(&m_SrvHeap))))
@@ -28,22 +28,21 @@ namespace Sea
             return false;
         }
 
-        // 初始化ImGui
+        m_SrvDescriptorSize = m_Device.GetDevice()->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+
         IMGUI_CHECKVERSION();
         ImGui::CreateContext();
-        
+
         ImGuiIO& io = ImGui::GetIO();
         io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
         io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
 
-        // 设置样式
         ImGui::StyleColorsDark();
         ImGuiStyle& style = ImGui::GetStyle();
         style.WindowRounding = 5.0f;
         style.FrameRounding = 3.0f;
         style.Colors[ImGuiCol_WindowBg].w = 0.95f;
 
-        // 初始化平台后端
         ImGui_ImplWin32_Init(m_Window.GetHandle());
         ImGui_ImplDX12_Init(m_Device.GetDevice(), numFrames,
             static_cast<DXGI_FORMAT>(rtvFormat),
@@ -81,12 +80,37 @@ namespace Sea
         cmdList->SetDescriptorHeaps(1, heaps);
         ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), cmdList);
 
-        // 更新额外平台窗口
         ImGuiIO& io = ImGui::GetIO();
         if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable)
         {
             ImGui::UpdatePlatformWindows();
             ImGui::RenderPlatformWindowsDefault(nullptr, cmdList);
         }
+    }
+
+    D3D12_GPU_DESCRIPTOR_HANDLE ImGuiRenderer::RegisterTexture(ID3D12Resource* texture, DXGI_FORMAT format)
+    {
+        if (m_NextDescriptorIndex >= MAX_DESCRIPTORS)
+        {
+            SEA_CORE_ERROR("ImGui SRV heap is full!");
+            return { 0 };
+        }
+
+        D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle = m_SrvHeap->GetCPUDescriptorHandleForHeapStart();
+        cpuHandle.ptr += m_NextDescriptorIndex * m_SrvDescriptorSize;
+
+        D3D12_GPU_DESCRIPTOR_HANDLE gpuHandle = m_SrvHeap->GetGPUDescriptorHandleForHeapStart();
+        gpuHandle.ptr += m_NextDescriptorIndex * m_SrvDescriptorSize;
+
+        D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+        srvDesc.Format = format;
+        srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+        srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        srvDesc.Texture2D.MipLevels = 1;
+
+        m_Device.GetDevice()->CreateShaderResourceView(texture, &srvDesc, cpuHandle);
+        m_NextDescriptorIndex++;
+
+        return gpuHandle;
     }
 }

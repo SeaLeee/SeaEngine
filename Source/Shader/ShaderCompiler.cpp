@@ -71,6 +71,13 @@ namespace Sea
     ShaderCompileResult ShaderCompiler::CompileFXC(const ShaderCompileDesc& desc)
     {
         std::string source = FileSystem::ReadTextFile(desc.filePath);
+        if (source.empty())
+        {
+            ShaderCompileResult result;
+            result.errors = "Failed to read shader file: " + desc.filePath.string();
+            SEA_CORE_ERROR("Failed to read shader file: {}", desc.filePath.string());
+            return result;
+        }
         return CompileFromSource(source, desc);
     }
 
@@ -80,9 +87,19 @@ namespace Sea
         if (!s_DxcCompiler) { result.errors = "DXC not initialized"; return result; }
 
         std::string source = FileSystem::ReadTextFile(desc.filePath);
+        if (source.empty())
+        {
+            result.errors = "Failed to read shader file: " + desc.filePath.string();
+            SEA_CORE_ERROR("Failed to read shader file: {}", desc.filePath.string());
+            return result;
+        }
+        
         std::wstring wSource(source.begin(), source.end());
         std::wstring wEntry(desc.entryPoint.begin(), desc.entryPoint.end());
-        std::wstring target(GetTargetProfile(desc.stage, desc.model).begin(), GetTargetProfile(desc.stage, desc.model).end());
+        
+        // 先保存到临时变量，避免迭代器来自不同的临时对象
+        std::string targetProfile = GetTargetProfile(desc.stage, desc.model);
+        std::wstring target(targetProfile.begin(), targetProfile.end());
 
         std::vector<LPCWSTR> args;
         args.push_back(L"-E"); args.push_back(wEntry.c_str());

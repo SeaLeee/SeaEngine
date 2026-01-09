@@ -1,6 +1,7 @@
 #include "Core/Application.h"
 #include "Core/Log.h"
 #include "Core/Timer.h"
+#include "Core/FileSystem.h"
 
 namespace Sea
 {
@@ -34,6 +35,11 @@ namespace Sea
     {
         Log::Initialize();
         SEA_CORE_INFO("SeaEngine Initializing...");
+
+        // 设置工作目录为可执行文件所在目录
+        auto exePath = FileSystem::GetExecutablePath();
+        std::filesystem::current_path(exePath);
+        SEA_CORE_INFO("Working directory: {}", exePath.string());
 
         // 创建窗口
         m_Window = MakeScope<Window>(m_Config.window);

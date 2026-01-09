@@ -18,6 +18,7 @@ namespace Sea
     {
     public:
         DescriptorHeap(Device& device, const DescriptorHeapDesc& desc);
+        DescriptorHeap(Device& device, const D3D12_DESCRIPTOR_HEAP_DESC& d3dDesc);
         ~DescriptorHeap();
 
         bool Initialize();
@@ -26,6 +27,9 @@ namespace Sea
 
         ID3D12DescriptorHeap* GetHeap() const { return m_Heap.Get(); }
         u32 GetDescriptorSize() const { return m_DescriptorSize; }
+        
+        D3D12_CPU_DESCRIPTOR_HANDLE GetCPUHandle(u32 index) const;
+        D3D12_GPU_DESCRIPTOR_HANDLE GetGPUHandle(u32 index) const;
 
     private:
         Device& m_Device;

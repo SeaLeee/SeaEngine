@@ -4,6 +4,7 @@
 #include "RenderGraph/RenderGraph.h"
 #include "Shader/Shader.h"
 #include "Editor/EditorModule.h"
+#include "Scene/Scene.h"
 
 namespace Sea
 {
@@ -22,6 +23,9 @@ namespace Sea
     private:
         void SetupRenderGraph();
         void CreateResources();
+        void CreateScene();
+        void UpdateCamera(f32 deltaTime);
+        bool CreateDepthBuffer();
 
     private:
         Scope<Device> m_Device;
@@ -35,8 +39,53 @@ namespace Sea
         Scope<ShaderEditor> m_ShaderEditor;
         Scope<ShaderLibrary> m_ShaderLibrary;
 
-        // ֡ͬ��
+        // 3D 场景
+        Scope<SimpleRenderer> m_Renderer;
+        Scope<Camera> m_Camera;
+        Scope<Mesh> m_GridMesh;
+        std::vector<Scope<Mesh>> m_Meshes;
+        std::vector<SceneObject> m_SceneObjects;
+        
+        // 深度缓冲
+        Scope<Texture> m_DepthBuffer;
+        Scope<DescriptorHeap> m_DSVHeap;
+        
+        // 离屏渲染目标（用于Viewport显示）
+        Scope<Texture> m_SceneRenderTarget;
+        Scope<DescriptorHeap> m_SceneRTVHeap;
+        D3D12_GPU_DESCRIPTOR_HANDLE m_SceneTextureHandle = { 0 };  // ImGui 使用的纹理句柄
+        u32 m_ViewportWidth = 1280;
+        u32 m_ViewportHeight = 720;
+
+        // 相机控制
+        bool m_CameraControl = false;
+        std::pair<i32, i32> m_LastMousePos = { 0, 0 };
+        f32 m_TotalTime = 0.0f;
+
+        // 帧同步
         std::vector<u64> m_FrameFenceValues;
         u32 m_FrameIndex = 0;
+
+        // 编辑器状态
+        bool m_FirstFrame = true;
+        bool m_ShowDemoWindow = false;
+        bool m_ShowViewport = true;
+        bool m_ShowHierarchy = true;
+        bool m_ShowInspector = true;
+        bool m_ShowConsole = true;
+        bool m_ShowAssetBrowser = true;
+        
+        // 编辑器方法
+        void SetupEditorLayout();
+        void RenderMainMenuBar();
+        void RenderToolbar();
+        void RenderStatusBar();
+        void RenderViewport();
+        void RenderHierarchy();
+        void RenderInspector();
+        void RenderConsole();
+        void RenderAssetBrowser();
+        bool CreateSceneRenderTarget(u32 width, u32 height);
+        void RenderSceneToTexture();
     };
 }
