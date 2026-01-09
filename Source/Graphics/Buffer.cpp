@@ -9,9 +9,10 @@ namespace Sea
 
     bool Buffer::Initialize(const void* data)
     {
+        bool useUploadHeap = (m_Desc.type == BufferType::Upload || m_Desc.type == BufferType::Constant);
+        
         D3D12_HEAP_PROPERTIES heapProps = {};
-        heapProps.Type = (m_Desc.type == BufferType::Upload || m_Desc.type == BufferType::Constant) 
-                         ? D3D12_HEAP_TYPE_UPLOAD : D3D12_HEAP_TYPE_DEFAULT;
+        heapProps.Type = useUploadHeap ? D3D12_HEAP_TYPE_UPLOAD : D3D12_HEAP_TYPE_UPLOAD;  // 暂时都用 Upload 堆，简化实现
 
         D3D12_RESOURCE_DESC resourceDesc = {};
         resourceDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
@@ -22,17 +23,20 @@ namespace Sea
         resourceDesc.SampleDesc.Count = 1;
         resourceDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
 
-        D3D12_RESOURCE_STATES initialState = heapProps.Type == D3D12_HEAP_TYPE_UPLOAD 
-            ? D3D12_RESOURCE_STATE_GENERIC_READ : D3D12_RESOURCE_STATE_COMMON;
+        D3D12_RESOURCE_STATES initialState = D3D12_RESOURCE_STATE_GENERIC_READ;
 
         m_Resource = m_Device.CreateCommittedResource(heapProps, D3D12_HEAP_FLAG_NONE, resourceDesc, initialState);
         if (!m_Resource) return false;
 
-        if (data && heapProps.Type == D3D12_HEAP_TYPE_UPLOAD)
+        // 对于 Upload 堆，直接写入数据
+        if (data)
         {
             void* mapped = Map();
-            memcpy(mapped, data, m_Desc.size);
-            Unmap();
+            if (mapped)
+            {
+                memcpy(mapped, data, m_Desc.size);
+                Unmap();
+            }
         }
         return true;
     }
