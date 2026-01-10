@@ -6,6 +6,8 @@ add_library(SeaRenderGraph STATIC
     GraphCompiler.cpp
     ResourcePool.cpp
     FrameResource.cpp
+    PassTemplate.cpp
+    PassTemplate.h
 )
 
 target_include_directories(SeaRenderGraph PUBLIC 

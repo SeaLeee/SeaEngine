@@ -3,6 +3,7 @@
 #include "Core/Log.h"
 #include "Graphics/RenderDocCapture.h"
 #include <imgui_internal.h>
+#include <filesystem>
 
 namespace Sea
 {
@@ -244,8 +245,11 @@ namespace Sea
         m_RenderGraph = MakeScope<RenderGraph>();
         SetupRenderGraph();
 
+        // 初始化 Pass 模板库
+        PassTemplateLibrary::Initialize();
+
         // 创建编辑器组件
-        m_NodeEditor = MakeScope<NodeEditor>(*m_RenderGraph);
+        m_NodeEditor = MakeScope<NodeEditor>(*m_RenderGraph, m_Device.get());
         m_NodeEditor->Initialize();
 
         m_PropertyPanel = MakeScope<PropertyPanel>(*m_RenderGraph);
@@ -324,6 +328,63 @@ namespace Sea
         }
 
         SEA_CORE_INFO("Scene created with {} objects", m_SceneObjects.size());
+        
+        // 扫描可用的外部模型
+        ScanAvailableModels();
+    }
+
+    void SampleApp::ScanAvailableModels()
+    {
+        m_AvailableModels.clear();
+        
+        std::filesystem::path modelsPath = "Assets/Models";
+        if (!std::filesystem::exists(modelsPath))
+        {
+            SEA_CORE_WARN("Models directory not found: {}", modelsPath.string());
+            return;
+        }
+        
+        for (const auto& entry : std::filesystem::directory_iterator(modelsPath))
+        {
+            if (entry.is_regular_file())
+            {
+                auto ext = entry.path().extension().string();
+                std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+                if (ext == ".obj")
+                {
+                    m_AvailableModels.push_back(entry.path().string());
+                    SEA_CORE_INFO("Found model: {}", entry.path().filename().string());
+                }
+            }
+        }
+        
+        SEA_CORE_INFO("Scanned {} OBJ models", m_AvailableModels.size());
+    }
+
+    bool SampleApp::LoadExternalModel(const std::string& filepath)
+    {
+        SEA_CORE_INFO("Loading external model: {}", filepath);
+        
+        auto mesh = MakeScope<Mesh>();
+        if (!mesh->LoadFromOBJ(*m_Device, filepath))
+        {
+            SEA_CORE_ERROR("Failed to load model: {}", filepath);
+            return false;
+        }
+        
+        // 添加到场景
+        SceneObject obj;
+        obj.mesh = mesh.get();
+        XMStoreFloat4x4(&obj.transform, XMMatrixTranslation(0.0f, 0.5f, 0.0f));
+        obj.color = { 0.9f, 0.85f, 0.7f, 1.0f };
+        obj.metallic = 0.3f;
+        obj.roughness = 0.4f;
+        
+        m_Meshes.push_back(std::move(mesh));
+        m_SceneObjects.push_back(obj);
+        
+        SEA_CORE_INFO("Model loaded and added to scene");
+        return true;
     }
 
     void SampleApp::OnShutdown()
@@ -336,6 +397,7 @@ namespace Sea
         m_RenderGraph.reset();
         m_ShaderLibrary.reset();
         ShaderCompiler::Shutdown();
+        PassTemplateLibrary::Shutdown();
         
         m_SceneObjects.clear();
         m_Meshes.clear();
@@ -823,42 +885,154 @@ namespace Sea
         
         if (ImGui::Begin("Asset Browser", &m_ShowAssetBrowser))
         {
-            // 路径导航
-            ImGui::Text("> Assets > Shaders");
-            ImGui::Separator();
-            
-            // 资源网格
-            float iconSize = 64.0f;
-            float padding = 16.0f;
-            int columns = static_cast<int>((ImGui::GetContentRegionAvail().x) / (iconSize + padding));
-            if (columns < 1) columns = 1;
-            
-            if (ImGui::BeginTable("AssetGrid", columns))
+            // 标签页
+            if (ImGui::BeginTabBar("AssetTabs"))
             {
-                const char* assets[] = { 
-                    "[S] Basic.hlsl", 
-                    "[S] Grid.hlsl", 
-                    "[S] GBuffer.hlsl",
-                    "[S] Tonemap.hlsl",
-                    "[S] Common.hlsli",
-                    "[M] Cube",
-                    "[M] Sphere",
-                    "[M] Torus"
-                };
-                
-                for (int i = 0; i < 8; ++i)
+                // Shaders 标签页
+                if (ImGui::BeginTabItem("Shaders"))
                 {
-                    ImGui::TableNextColumn();
+                    ImGui::Text("> Assets > Shaders");
+                    ImGui::Separator();
                     
-                    ImGui::PushID(i);
-                    if (ImGui::Button(assets[i], ImVec2(iconSize + 20, iconSize)))
+                    float iconSize = 64.0f;
+                    float padding = 16.0f;
+                    int columns = static_cast<int>((ImGui::GetContentRegionAvail().x) / (iconSize + padding));
+                    if (columns < 1) columns = 1;
+                    
+                    if (ImGui::BeginTable("ShaderGrid", columns))
                     {
-                        // 选择资源
+                        const char* shaders[] = { 
+                            "[S] Basic.hlsl", 
+                            "[S] Grid.hlsl", 
+                            "[S] GBuffer.hlsl",
+                            "[S] Tonemap.hlsl",
+                            "[S] Common.hlsli"
+                        };
+                        
+                        for (int i = 0; i < 5; ++i)
+                        {
+                            ImGui::TableNextColumn();
+                            ImGui::PushID(i);
+                            if (ImGui::Button(shaders[i], ImVec2(iconSize + 20, iconSize)))
+                            {
+                                // 选择 Shader
+                            }
+                            ImGui::PopID();
+                        }
+                        ImGui::EndTable();
                     }
-                    ImGui::PopID();
+                    ImGui::EndTabItem();
                 }
                 
-                ImGui::EndTable();
+                // Models 标签页
+                if (ImGui::BeginTabItem("Models"))
+                {
+                    ImGui::Text("> Assets > Models");
+                    ImGui::Separator();
+                    
+                    // 刷新按钮
+                    if (ImGui::Button("Refresh Models"))
+                    {
+                        ScanAvailableModels();
+                    }
+                    ImGui::SameLine();
+                    ImGui::Text("Found: %zu models", m_AvailableModels.size());
+                    ImGui::Separator();
+                    
+                    // 内置几何体
+                    ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "Built-in Geometry:");
+                    float iconSize = 80.0f;
+                    
+                    if (ImGui::Button("[Cube]", ImVec2(iconSize, iconSize / 2)))
+                    {
+                        auto cube = Mesh::CreateCube(*m_Device, 1.0f);
+                        if (cube)
+                        {
+                            SceneObject obj;
+                            obj.mesh = cube.get();
+                            XMStoreFloat4x4(&obj.transform, XMMatrixTranslation(0, 0.5f, 0));
+                            obj.color = { 0.8f, 0.4f, 0.2f, 1.0f };
+                            m_Meshes.push_back(std::move(cube));
+                            m_SceneObjects.push_back(obj);
+                        }
+                    }
+                    ImGui::SameLine();
+                    if (ImGui::Button("[Sphere]", ImVec2(iconSize, iconSize / 2)))
+                    {
+                        auto sphere = Mesh::CreateSphere(*m_Device, 0.5f, 32, 16);
+                        if (sphere)
+                        {
+                            SceneObject obj;
+                            obj.mesh = sphere.get();
+                            XMStoreFloat4x4(&obj.transform, XMMatrixTranslation(0, 0.5f, 0));
+                            obj.color = { 0.2f, 0.6f, 0.9f, 1.0f };
+                            m_Meshes.push_back(std::move(sphere));
+                            m_SceneObjects.push_back(obj);
+                        }
+                    }
+                    ImGui::SameLine();
+                    if (ImGui::Button("[Torus]", ImVec2(iconSize, iconSize / 2)))
+                    {
+                        auto torus = Mesh::CreateTorus(*m_Device, 0.6f, 0.2f, 32, 24);
+                        if (torus)
+                        {
+                            SceneObject obj;
+                            obj.mesh = torus.get();
+                            XMStoreFloat4x4(&obj.transform, XMMatrixTranslation(0, 0.5f, 0));
+                            obj.color = { 0.9f, 0.3f, 0.8f, 1.0f };
+                            m_Meshes.push_back(std::move(torus));
+                            m_SceneObjects.push_back(obj);
+                        }
+                    }
+                    
+                    ImGui::Spacing();
+                    ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "External OBJ Models:");
+                    ImGui::Separator();
+                    
+                    // 外部 OBJ 模型列表
+                    if (m_AvailableModels.empty())
+                    {
+                        ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "No OBJ models found in Assets/Models/");
+                        ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "Place .obj files there and click Refresh");
+                    }
+                    else
+                    {
+                        for (size_t i = 0; i < m_AvailableModels.size(); ++i)
+                        {
+                            std::filesystem::path p(m_AvailableModels[i]);
+                            std::string filename = p.filename().string();
+                            
+                            ImGui::PushID(static_cast<int>(i));
+                            
+                            bool isSelected = (m_SelectedModelIndex == static_cast<int>(i));
+                            if (ImGui::Selectable(filename.c_str(), isSelected, 0, ImVec2(0, 24)))
+                            {
+                                m_SelectedModelIndex = static_cast<int>(i);
+                            }
+                            
+                            ImGui::SameLine(ImGui::GetWindowWidth() - 100);
+                            if (ImGui::SmallButton("Load"))
+                            {
+                                LoadExternalModel(m_AvailableModels[i]);
+                            }
+                            
+                            ImGui::PopID();
+                        }
+                    }
+                    
+                    ImGui::Spacing();
+                    ImGui::Separator();
+                    ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.5f, 1.0f), "Scene Objects: %zu", m_SceneObjects.size());
+                    
+                    if (ImGui::Button("Clear All Objects"))
+                    {
+                        m_SceneObjects.clear();
+                    }
+                    
+                    ImGui::EndTabItem();
+                }
+                
+                ImGui::EndTabBar();
             }
         }
         ImGui::End();

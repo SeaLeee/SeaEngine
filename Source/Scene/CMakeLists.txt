@@ -5,6 +5,8 @@ add_library(SeaScene STATIC
     Camera.h
     SimpleRenderer.cpp
     SimpleRenderer.h
+    SceneRenderer.cpp
+    SceneRenderer.h
     Scene.h
 )
 

@@ -2,9 +2,11 @@
 #include "Core/Application.h"
 #include "Graphics/Graphics.h"
 #include "RenderGraph/RenderGraph.h"
+#include "RenderGraph/PassTemplate.h"
 #include "Shader/Shader.h"
 #include "Editor/EditorModule.h"
 #include "Scene/Scene.h"
+#include "Scene/SceneRenderer.h"
 
 namespace Sea
 {
@@ -45,6 +47,12 @@ namespace Sea
         Scope<Mesh> m_GridMesh;
         std::vector<Scope<Mesh>> m_Meshes;
         std::vector<SceneObject> m_SceneObjects;
+        
+        // 外部模型
+        std::vector<std::string> m_AvailableModels;
+        int m_SelectedModelIndex = -1;
+        bool LoadExternalModel(const std::string& filepath);
+        void ScanAvailableModels();
         
         // 深度缓冲
         Scope<Texture> m_DepthBuffer;
