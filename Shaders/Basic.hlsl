@@ -3,9 +3,9 @@
 
 cbuffer PerFrameData : register(b0)
 {
-    float4x4 ViewProjection;
-    float4x4 View;
-    float4x4 Projection;
+    row_major float4x4 ViewProjection;
+    row_major float4x4 View;
+    row_major float4x4 Projection;
     float3 CameraPosition;
     float Time;
     float3 LightDirection;
@@ -18,12 +18,17 @@ cbuffer PerFrameData : register(b0)
 
 cbuffer PerObjectData : register(b1)
 {
-    float4x4 World;
-    float4x4 WorldInvTranspose;
+    row_major float4x4 World;
+    row_major float4x4 WorldInvTranspose;
     float4 BaseColor;
     float Metallic;
     float Roughness;
-    float2 _Padding3;
+    float AO;
+    float EmissiveIntensity;
+    float3 EmissiveColor;
+    float NormalScale;
+    uint TextureFlags;
+    float3 _Padding3;
 };
 
 struct VSInput

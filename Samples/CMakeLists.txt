@@ -13,6 +13,14 @@ add_custom_command(TARGET SampleApp POST_BUILD
     $<TARGET_FILE_DIR:SampleApp>/Shaders
 )
 
+# 复制场景文件到输出目录
+add_custom_command(TARGET SampleApp POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    ${CMAKE_SOURCE_DIR}/Scenes
+    $<TARGET_FILE_DIR:SampleApp>/Scenes
+    COMMENT "Copying scene files..."
+)
+
 # 查找并复制 DXC DLL 到输出目录
 find_program(DXC_EXECUTABLE dxc
     PATHS

@@ -3,11 +3,17 @@
 
 cbuffer PerFrameData : register(b0)
 {
-    float4x4 ViewProjection;
-    float4x4 View;
-    float4x4 Projection;
+    row_major float4x4 ViewProjection;
+    row_major float4x4 View;
+    row_major float4x4 Projection;
     float3 CameraPosition;
     float Time;
+    float3 LightDirection;
+    float _Padding1;
+    float3 LightColor;
+    float LightIntensity;
+    float3 AmbientColor;
+    float _Padding2;
 };
 
 struct VSInput

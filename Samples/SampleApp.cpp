@@ -2,6 +2,7 @@
 #include "Core/Input.h"
 #include "Core/Log.h"
 #include "Graphics/RenderDocCapture.h"
+#include "Scene/SceneManager.h"
 #include <imgui_internal.h>
 #include <filesystem>
 
@@ -232,11 +233,11 @@ namespace Sea
         if (!m_Renderer->Initialize())
             return false;
 
-        // 创建相机
+        // 创建相机 - 调整位置以观察 PBR 材质球阵列
         m_Camera = MakeScope<Camera>();
-        m_Camera->SetPosition({ 0, 3, -8 });
+        m_Camera->SetPosition({ 0, 8, -12 });
         m_Camera->SetPerspective(45.0f, m_Window->GetAspectRatio(), 0.1f, 1000.0f);
-        m_Camera->LookAt({ 0, 0, 0 });
+        m_Camera->LookAt({ 0, 0, 5 });
 
         // 创建场景
         CreateScene();
@@ -267,67 +268,63 @@ namespace Sea
 
     void SampleApp::CreateScene()
     {
-        SEA_CORE_INFO("Creating scene meshes...");
+        SEA_CORE_INFO("Initializing SceneManager...");
 
-        // 创建地面网格
-        m_GridMesh = Mesh::CreatePlane(*m_Device, 100.0f, 100.0f);
-
-        // 创建几何体
-        auto cube = Mesh::CreateCube(*m_Device, 1.0f);
-        auto sphere = Mesh::CreateSphere(*m_Device, 0.5f, 32, 16);
-        auto torus = Mesh::CreateTorus(*m_Device, 0.6f, 0.2f, 32, 24);
-
-        if (cube) m_Meshes.push_back(std::move(cube));
-        if (sphere) m_Meshes.push_back(std::move(sphere));
-        if (torus) m_Meshes.push_back(std::move(torus));
-
-        // 创建场景对象
-        // 多个立方体
-        for (int i = -2; i <= 2; ++i)
+        // 创建场景管理器
+        m_SceneManager = MakeScope<SceneManager>(*m_Device);
+        
+        // 创建海洋模拟
+        m_Ocean = MakeScope<Ocean>(*m_Device);
+        OceanParams oceanParams;
+        oceanParams.patchSize = 500.0f;
+        oceanParams.gridSize = 200.0f;
+        oceanParams.windSpeed = 20.0f;
+        oceanParams.amplitude = 1.0f;
+        if (!m_Ocean->Initialize(oceanParams))
         {
-            SceneObject obj;
-            obj.mesh = m_Meshes[0].get();
-            XMStoreFloat4x4(&obj.transform, XMMatrixTranslation(static_cast<f32>(i) * 2.5f, 0.5f, 0));
+            SEA_CORE_WARN("Failed to initialize Ocean simulation - Ocean scenes will not be available");
+            m_Ocean.reset();
+        }
+        
+        // 设置场景切换回调
+        m_SceneManager->SetOnSceneChanged([this](const std::string& sceneName) {
+            SEA_CORE_INFO("Scene changed to: {}", sceneName);
             
-            // 不同颜色
-            float hue = (i + 2) / 5.0f;
-            obj.color = { 
-                0.5f + 0.5f * std::sin(hue * 6.28f),
-                0.5f + 0.5f * std::sin((hue + 0.33f) * 6.28f),
-                0.5f + 0.5f * std::sin((hue + 0.66f) * 6.28f),
-                1.0f
-            };
-            obj.metallic = 0.1f + i * 0.2f;
-            obj.roughness = 0.3f;
-            m_SceneObjects.push_back(obj);
-        }
-
-        // 球体
-        for (int i = -2; i <= 2; ++i)
+            // 检测是否为海洋场景
+            m_OceanSceneActive = (sceneName.find("Ocean") != std::string::npos);
+            
+            if (m_OceanSceneActive)
+            {
+                // 为海洋场景设置相机
+                m_Camera->SetPosition({ 0, 15, -40 });
+                m_Camera->LookAt({ 0, 0, 50 });
+            }
+        });
+        
+        // 扫描场景目录
+        m_SceneManager->ScanScenes("Scenes");
+        
+        // 如果有可用场景，加载第一个；否则创建默认 PBR Demo 场景
+        if (!m_SceneManager->GetSceneFiles().empty())
         {
-            SceneObject obj;
-            obj.mesh = m_Meshes[1].get();
-            XMStoreFloat4x4(&obj.transform, XMMatrixTranslation(static_cast<f32>(i) * 2.5f, 0.5f, 3.0f));
-            obj.color = { 1.0f, 0.8f, 0.6f, 1.0f };
-            obj.metallic = 0.9f;
-            obj.roughness = (i + 2) * 0.2f;
-            m_SceneObjects.push_back(obj);
+            m_SceneManager->LoadScene(0);
         }
-
-        // 甜甜圈
-        for (int i = -1; i <= 1; ++i)
+        else
         {
-            SceneObject obj;
-            obj.mesh = m_Meshes[2].get();
-            XMStoreFloat4x4(&obj.transform, 
-                XMMatrixRotationX(XM_PIDIV2) * XMMatrixTranslation(static_cast<f32>(i) * 3.0f, 1.0f, -3.0f));
-            obj.color = { 0.8f, 0.2f, 0.9f, 1.0f };
-            obj.metallic = 0.5f;
-            obj.roughness = 0.2f;
-            m_SceneObjects.push_back(obj);
+            m_SceneManager->CreatePBRDemoScene();
         }
-
-        SEA_CORE_INFO("Scene created with {} objects", m_SceneObjects.size());
+        
+        // 获取网格和场景对象的引用
+        m_GridMesh = Mesh::CreatePlane(*m_Device, 100.0f, 100.0f);
+        
+        // 从 SceneManager 复制场景对象
+        m_SceneObjects = m_SceneManager->GetSceneObjects();
+        
+        // 应用场景设置
+        m_SceneManager->ApplyToRenderer(*m_Renderer);
+        m_SceneManager->ApplyToCamera(*m_Camera);
+        
+        SEA_CORE_INFO("Scene initialized with {} objects", m_SceneObjects.size());
         
         // 扫描可用的外部模型
         ScanAvailableModels();
@@ -646,9 +643,95 @@ namespace Sea
             // RenderDoc 按钮
             if (ImGui::Button("F12: Capture", ImVec2(100, 30)))
             {
-                RenderDocCapture::TriggerCapture();
+                if (!m_PendingCapture)
+                {
+                    m_PendingCapture = true;
+                    RenderDocCapture::TriggerCapture(); // 开始截帧
+                }
             }
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("Capture frame with RenderDoc");
+            
+            ImGui::SameLine();
+            
+            // 显示截帧数量并提供打开RenderDoc UI的按钮
+            uint32_t numCaptures = RenderDocCapture::GetNumCaptures();
+            char captureLabel[64];
+            snprintf(captureLabel, sizeof(captureLabel), "View (%u)", numCaptures);
+            if (ImGui::Button(captureLabel, ImVec2(80, 30)))
+            {
+                RenderDocCapture::LaunchReplayUI();
+            }
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Open RenderDoc to view captures");
+            
+            ImGui::SameLine();
+            ImGui::SeparatorEx(ImGuiSeparatorFlags_Vertical);
+            ImGui::SameLine();
+            
+            // ========== 场景选择器 ==========
+            if (m_SceneManager)
+            {
+                ImGui::Text("Scene:");
+                ImGui::SameLine();
+                
+                // 上一个场景按钮
+                if (ImGui::Button("<##PrevScene", ImVec2(25, 30)))
+                {
+                    m_SceneManager->PreviousScene();
+                    m_SceneObjects = m_SceneManager->GetSceneObjects();
+                    m_SceneManager->ApplyToRenderer(*m_Renderer);
+                    m_SceneManager->ApplyToCamera(*m_Camera);
+                    // 检测是否为海洋场景
+                    auto sceneName = m_SceneManager->GetCurrentSceneName();
+                    m_OceanSceneActive = (sceneName.find("Ocean") != std::string::npos);
+                }
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Previous Scene (Page Up)");
+                ImGui::SameLine();
+                
+                // 场景下拉框
+                const auto& sceneNames = m_SceneManager->GetSceneNames();
+                int currentScene = m_SceneManager->GetCurrentSceneIndex();
+                ImGui::SetNextItemWidth(150);
+                if (!sceneNames.empty())
+                {
+                    if (ImGui::BeginCombo("##SceneCombo", currentScene >= 0 ? sceneNames[currentScene].c_str() : "No Scene"))
+                    {
+                        for (int i = 0; i < static_cast<int>(sceneNames.size()); ++i)
+                        {
+                            bool isSelected = (currentScene == i);
+                            if (ImGui::Selectable(sceneNames[i].c_str(), isSelected))
+                            {
+                                m_SceneManager->LoadScene(i);
+                                m_SceneObjects = m_SceneManager->GetSceneObjects();
+                                m_SceneManager->ApplyToRenderer(*m_Renderer);
+                                m_SceneManager->ApplyToCamera(*m_Camera);
+                                // 检测是否为海洋场景
+                                m_OceanSceneActive = (sceneNames[i].find("Ocean") != std::string::npos);
+                            }
+                            if (isSelected)
+                                ImGui::SetItemDefaultFocus();
+                        }
+                        ImGui::EndCombo();
+                    }
+                }
+                else
+                {
+                    ImGui::Text("PBR Demo");
+                }
+                ImGui::SameLine();
+                
+                // 下一个场景按钮
+                if (ImGui::Button(">##NextScene", ImVec2(25, 30)))
+                {
+                    m_SceneManager->NextScene();
+                    m_SceneObjects = m_SceneManager->GetSceneObjects();
+                    m_SceneManager->ApplyToRenderer(*m_Renderer);
+                    m_SceneManager->ApplyToCamera(*m_Camera);
+                    // 检测是否为海洋场景
+                    auto sceneName = m_SceneManager->GetCurrentSceneName();
+                    m_OceanSceneActive = (sceneName.find("Ocean") != std::string::npos);
+                }
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Next Scene (Page Down)");
+            }
         }
         ImGui::End();
         
@@ -1044,29 +1127,38 @@ namespace Sea
         m_TotalTime += deltaTime;
 
         // F12触发RenderDoc截帧
-        if (Input::IsKeyPressed(KeyCode::F12))
+        if (Input::IsKeyPressed(KeyCode::F12) && !m_PendingCapture)
         {
+            m_PendingCapture = true;
             RenderDocCapture::TriggerCapture();
             SEA_CORE_INFO("RenderDoc capture triggered");
         }
 
+        // 场景切换快捷键
+        if (m_SceneManager)
+        {
+            // Page Down: 下一个场景
+            if (Input::IsKeyPressed(KeyCode::PageDown))
+            {
+                m_SceneManager->NextScene();
+                m_SceneObjects = m_SceneManager->GetSceneObjects();
+                m_SceneManager->ApplyToRenderer(*m_Renderer);
+                m_SceneManager->ApplyToCamera(*m_Camera);
+                SEA_CORE_INFO("Switched to scene: {}", m_SceneManager->GetCurrentSceneName());
+            }
+            // Page Up: 上一个场景
+            if (Input::IsKeyPressed(KeyCode::PageUp))
+            {
+                m_SceneManager->PreviousScene();
+                m_SceneObjects = m_SceneManager->GetSceneObjects();
+                m_SceneManager->ApplyToRenderer(*m_Renderer);
+                m_SceneManager->ApplyToCamera(*m_Camera);
+                SEA_CORE_INFO("Switched to scene: {}", m_SceneManager->GetCurrentSceneName());
+            }
+        }
+
         // 更新相机
         UpdateCamera(deltaTime);
-
-        // 旋转场景中的物体
-        for (size_t i = 0; i < m_SceneObjects.size(); ++i)
-        {
-            auto& obj = m_SceneObjects[i];
-            XMMATRIX current = XMLoadFloat4x4(&obj.transform);
-            XMVECTOR scale, rot, trans;
-            XMMatrixDecompose(&scale, &rot, &trans, current);
-
-            // 缓慢旋转
-            f32 rotSpeed = 0.5f + (i % 3) * 0.2f;
-            XMMATRIX newRot = XMMatrixRotationY(m_TotalTime * rotSpeed);
-            XMMATRIX newTransform = XMMatrixScalingFromVector(scale) * newRot * XMMatrixTranslationFromVector(trans);
-            XMStoreFloat4x4(&obj.transform, newTransform);
-        }
 
         m_ImGuiRenderer->BeginFrame();
 
@@ -1173,8 +1265,22 @@ namespace Sea
             );
             cmdList->FlushBarriers();
 
-            // 清除场景渲染目标
-            f32 sceneClearColor[] = { 0.1f, 0.1f, 0.15f, 1.0f };
+            // 清除场景渲染目标（海洋场景使用天空色）
+            f32 sceneClearColor[4];
+            if (m_OceanSceneActive)
+            {
+                sceneClearColor[0] = 0.4f;  // 天空色
+                sceneClearColor[1] = 0.6f;
+                sceneClearColor[2] = 0.9f;
+                sceneClearColor[3] = 1.0f;
+            }
+            else
+            {
+                sceneClearColor[0] = 0.1f;
+                sceneClearColor[1] = 0.1f;
+                sceneClearColor[2] = 0.15f;
+                sceneClearColor[3] = 1.0f;
+            }
             D3D12_CPU_DESCRIPTOR_HANDLE sceneRtv = m_SceneRTVHeap->GetCPUHandle(0);
             cmdList->GetCommandList()->ClearRenderTargetView(sceneRtv, sceneClearColor, 0, nullptr);
             
@@ -1195,16 +1301,27 @@ namespace Sea
             // 开始3D渲染
             m_Renderer->BeginFrame(*m_Camera, m_TotalTime);
 
-            // 渲染网格
-            if (m_GridMesh)
+            // 根据场景类型渲染
+            if (m_OceanSceneActive && m_Ocean)
             {
-                m_Renderer->RenderGrid(*cmdList, *m_GridMesh);
+                // 渲染海洋场景
+                m_Ocean->Update(0.016f, *cmdList);  // 假设60fps
+                m_Ocean->Render(*cmdList, *m_Camera);
             }
-
-            // 渲染场景对象
-            for (const auto& obj : m_SceneObjects)
+            else
             {
-                m_Renderer->RenderObject(*cmdList, obj);
+                // 渲染普通场景
+                // 渲染网格
+                if (m_GridMesh)
+                {
+                    m_Renderer->RenderGrid(*cmdList, *m_GridMesh);
+                }
+
+                // 渲染场景对象
+                for (const auto& obj : m_SceneObjects)
+                {
+                    m_Renderer->RenderObject(*cmdList, obj);
+                }
             }
 
             // 转换场景渲染目标到 ShaderResource 状态（供 ImGui 使用）
@@ -1265,6 +1382,13 @@ namespace Sea
 
         // 发送fence信号
         m_FrameFenceValues[m_FrameIndex] = m_GraphicsQueue->Signal();
+        
+        // 如果正在截帧，结束截帧并打开 RenderDoc
+        if (m_PendingCapture)
+        {
+            m_PendingCapture = false;
+            RenderDocCapture::EndCaptureAndOpen();
+        }
     }
 
     void SampleApp::OnResize(u32 width, u32 height)
@@ -1282,76 +1406,55 @@ namespace Sea
         // 初始化RenderGraph
         m_RenderGraph->Initialize(m_Device.get());
 
-        // 创建GBuffer资源
-        u32 albedoId = m_RenderGraph->CreateResource("Albedo", ResourceNodeType::Texture2D);
-        if (auto* albedo = m_RenderGraph->GetResource(albedoId))
+        // 创建资源节点 - 反映实际渲染流程
+        u32 depthId = m_RenderGraph->CreateResource("Depth Buffer", ResourceNodeType::Texture2D);
+        if (auto* depth = m_RenderGraph->GetResource(depthId))
         {
-            albedo->SetDimensions(1920, 1080);
-            albedo->SetFormat(Format::R8G8B8A8_UNORM);
-            albedo->SetPosition(50, 50);
+            depth->SetDimensions(1920, 1080);
+            depth->SetFormat(Format::D32_FLOAT);
+            depth->SetPosition(50, 100);
         }
 
-        u32 normalId = m_RenderGraph->CreateResource("Normal", ResourceNodeType::Texture2D);
-        if (auto* normal = m_RenderGraph->GetResource(normalId))
+        u32 sceneColorId = m_RenderGraph->CreateResource("Scene Color", ResourceNodeType::Texture2D);
+        if (auto* sceneColor = m_RenderGraph->GetResource(sceneColorId))
         {
-            normal->SetDimensions(1920, 1080);
-            normal->SetFormat(Format::R16G16B16A16_FLOAT);
-            normal->SetPosition(50, 150);
+            sceneColor->SetDimensions(1920, 1080);
+            sceneColor->SetFormat(Format::R8G8B8A8_UNORM);
+            sceneColor->SetPosition(350, 100);
         }
 
-        u32 hdrId = m_RenderGraph->CreateResource("HDR Color", ResourceNodeType::Texture2D);
-        if (auto* hdr = m_RenderGraph->GetResource(hdrId))
+        u32 backBufferId = m_RenderGraph->CreateResource("Back Buffer", ResourceNodeType::Texture2D);
+        if (auto* backBuffer = m_RenderGraph->GetResource(backBufferId))
         {
-            hdr->SetDimensions(1920, 1080);
-            hdr->SetFormat(Format::R16G16B16A16_FLOAT);
-            hdr->SetPosition(350, 100);
+            backBuffer->SetDimensions(1920, 1080);
+            backBuffer->SetFormat(Format::R8G8B8A8_UNORM);
+            backBuffer->SetPosition(650, 100);
         }
 
-        u32 ldrId = m_RenderGraph->CreateResource("LDR Output", ResourceNodeType::Texture2D);
-        if (auto* ldr = m_RenderGraph->GetResource(ldrId))
+        // Forward PBR Pass - 渲染场景对象 (Grid + PBR Objects 或 Ocean)
+        u32 forwardId = m_RenderGraph->AddPass("Forward PBR", PassType::Graphics);
+        if (auto* forward = m_RenderGraph->GetPass(forwardId))
         {
-            ldr->SetDimensions(1920, 1080);
-            ldr->SetFormat(Format::R8G8B8A8_UNORM);
-            ldr->SetPosition(650, 100);
+            forward->AddOutput("Scene Color");
+            forward->AddOutput("Depth");
+            forward->SetOutput(0, sceneColorId);
+            forward->SetOutput(1, depthId);
+            forward->SetPosition(200, 100);
         }
 
-        // GBuffer Pass
-        u32 gbufferId = m_RenderGraph->AddPass("GBuffer Pass", PassType::Graphics);
-        if (auto* gbuffer = m_RenderGraph->GetPass(gbufferId))
+        // ImGui Pass - 渲染 UI 到后缓冲
+        u32 imguiId = m_RenderGraph->AddPass("ImGui", PassType::Graphics);
+        if (auto* imgui = m_RenderGraph->GetPass(imguiId))
         {
-            gbuffer->AddOutput("Albedo");
-            gbuffer->AddOutput("Normal");
-            gbuffer->SetOutput(0, albedoId);
-            gbuffer->SetOutput(1, normalId);
-            gbuffer->SetPosition(200, 100);
-        }
-
-        // Lighting Pass
-        u32 lightingId = m_RenderGraph->AddPass("Lighting Pass", PassType::Graphics);
-        if (auto* lighting = m_RenderGraph->GetPass(lightingId))
-        {
-            lighting->AddInput("Albedo");
-            lighting->AddInput("Normal");
-            lighting->AddOutput("HDR");
-            lighting->SetInput(0, albedoId);
-            lighting->SetInput(1, normalId);
-            lighting->SetOutput(0, hdrId);
-            lighting->SetPosition(450, 100);
-        }
-
-        // Tonemap Pass
-        u32 tonemapId = m_RenderGraph->AddPass("Tonemap", PassType::Graphics);
-        if (auto* tonemap = m_RenderGraph->GetPass(tonemapId))
-        {
-            tonemap->AddInput("HDR");
-            tonemap->AddOutput("LDR");
-            tonemap->SetInput(0, hdrId);
-            tonemap->SetOutput(0, ldrId);
-            tonemap->SetPosition(700, 100);
+            imgui->AddInput("Scene Color");
+            imgui->AddOutput("Back Buffer");
+            imgui->SetInput(0, sceneColorId);
+            imgui->SetOutput(0, backBufferId);
+            imgui->SetPosition(500, 100);
         }
 
         m_RenderGraph->Compile();
-        SEA_CORE_INFO("Default render graph created with {} passes", m_RenderGraph->GetPasses().size());
+        SEA_CORE_INFO("Render graph created with {} passes (Forward PBR + ImGui)", m_RenderGraph->GetPasses().size());
     }
 
     void SampleApp::CreateResources()

@@ -1,0 +1,35 @@
+{
+  "name": "Ocean",
+  "description": "FFT Ocean simulation with Gerstner waves",
+  "version": "1.0",
+  "camera": {
+    "position": [0, 15, -40],
+    "lookAt": [0, 0, 50],
+    "fov": 60,
+    "near": 0.1,
+    "far": 5000
+  },
+  "environment": {
+    "type": "ocean",
+    "oceanParams": {
+      "patchSize": 500,
+      "gridSize": 200,
+      "windSpeed": 20,
+      "windDirection": [0.8, 0.6],
+      "amplitude": 1.0,
+      "choppiness": 1.5
+    },
+    "sunDirection": [-0.5, -0.7, 0.5],
+    "oceanColor": [0.01, 0.05, 0.12, 1.0],
+    "skyColor": [0.5, 0.7, 0.95, 1.0]
+  },
+  "lights": [
+    {
+      "type": "directional",
+      "direction": [-0.5, -0.7, 0.5],
+      "color": [1.0, 0.95, 0.85],
+      "intensity": 2.0
+    }
+  ],
+  "objects": []
+}

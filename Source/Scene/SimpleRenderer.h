@@ -92,6 +92,11 @@ namespace Sea
 
         Scope<Buffer> m_FrameConstantBuffer;
         Scope<Buffer> m_ObjectConstantBuffer;
+        
+        // 动态常量缓冲区分配
+        static constexpr u32 MAX_OBJECTS_PER_FRAME = 256;
+        static constexpr u32 OBJECT_CB_ALIGNMENT = 256;  // D3D12 常量缓冲区对齐要求
+        u32 m_CurrentObjectIndex = 0;
 
         FrameConstants m_FrameConstants;
         

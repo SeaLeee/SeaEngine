@@ -12,10 +12,10 @@ static const float EPSILON = 1e-6f;
 // Common constant buffer
 cbuffer FrameConstants : register(b0)
 {
-    float4x4 g_ViewMatrix;
-    float4x4 g_ProjMatrix;
-    float4x4 g_ViewProjMatrix;
-    float4x4 g_InvViewProjMatrix;
+    row_major float4x4 g_ViewMatrix;
+    row_major float4x4 g_ProjMatrix;
+    row_major float4x4 g_ViewProjMatrix;
+    row_major float4x4 g_InvViewProjMatrix;
     float3 g_CameraPosition;
     float g_Time;
     float2 g_ScreenSize;

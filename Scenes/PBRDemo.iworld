@@ -1,0 +1,116 @@
+{
+  "name": "PBR Material Demo",
+  "description": "7x7 grid of spheres demonstrating different metallic and roughness combinations",
+  "author": "SeaEngine",
+  "version": "1.0",
+  "camera": {
+    "position": [0, 8, -12],
+    "target": [0, 0, 5],
+    "fov": 60,
+    "near": 0.1,
+    "far": 1000
+  },
+  "environment": {
+    "ambient": [0.15, 0.18, 0.22],
+    "clearColor": [0.1, 0.1, 0.15, 1.0],
+    "showGrid": true
+  },
+  "lights": [
+    {
+      "type": "directional",
+      "direction": [-0.5, -1.0, 0.5],
+      "color": [1.0, 0.98, 0.95],
+      "intensity": 2.0
+    }
+  ],
+  "objects": [
+    {
+      "name": "Gold Sphere",
+      "type": "sphere",
+      "position": [-6.0, 0.75, 0.0],
+      "scale": [1.5, 1.5, 1.5],
+      "material": {
+        "color": [1.0, 0.766, 0.336, 1.0],
+        "metallic": 1.0,
+        "roughness": 0.3
+      }
+    },
+    {
+      "name": "Silver Sphere",
+      "type": "sphere",
+      "position": [-3.5, 0.75, 0.0],
+      "scale": [1.5, 1.5, 1.5],
+      "material": {
+        "color": [0.972, 0.960, 0.915, 1.0],
+        "metallic": 1.0,
+        "roughness": 0.2
+      }
+    },
+    {
+      "name": "Copper Sphere",
+      "type": "sphere",
+      "position": [-6.0, 0.75, -2.5],
+      "scale": [1.5, 1.5, 1.5],
+      "material": {
+        "color": [0.955, 0.638, 0.538, 1.0],
+        "metallic": 1.0,
+        "roughness": 0.35
+      }
+    },
+    {
+      "name": "Steel Sphere",
+      "type": "sphere",
+      "position": [-3.5, 0.75, -2.5],
+      "scale": [1.5, 1.5, 1.5],
+      "material": {
+        "color": [0.56, 0.57, 0.58, 1.0],
+        "metallic": 1.0,
+        "roughness": 0.4
+      }
+    },
+    {
+      "name": "Red Plastic",
+      "type": "sphere",
+      "position": [6.0, 0.75, 0.0],
+      "scale": [1.5, 1.5, 1.5],
+      "material": {
+        "color": [0.9, 0.1, 0.1, 1.0],
+        "metallic": 0.0,
+        "roughness": 0.4
+      }
+    },
+    {
+      "name": "Blue Ceramic",
+      "type": "sphere",
+      "position": [3.5, 0.75, 0.0],
+      "scale": [1.5, 1.5, 1.5],
+      "material": {
+        "color": [0.2, 0.4, 0.8, 1.0],
+        "metallic": 0.0,
+        "roughness": 0.1
+      }
+    },
+    {
+      "name": "Green Rubber",
+      "type": "sphere",
+      "position": [6.0, 0.75, -2.5],
+      "scale": [1.5, 1.5, 1.5],
+      "material": {
+        "color": [0.2, 0.7, 0.3, 1.0],
+        "metallic": 0.0,
+        "roughness": 0.8
+      }
+    },
+    {
+      "name": "White Marble",
+      "type": "sphere",
+      "position": [3.5, 0.75, -2.5],
+      "scale": [1.5, 1.5, 1.5],
+      "material": {
+        "color": [0.95, 0.93, 0.88, 1.0],
+        "metallic": 0.0,
+        "roughness": 0.15
+      }
+    }
+  ]
+}

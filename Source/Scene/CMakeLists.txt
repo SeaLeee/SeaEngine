@@ -8,6 +8,12 @@ add_library(SeaScene STATIC
     SceneRenderer.cpp
     SceneRenderer.h
     Scene.h
+    SceneFile.cpp
+    SceneFile.h
+    SceneManager.cpp
+    SceneManager.h
+    Ocean.cpp
+    Ocean.h
 )
 
 target_include_directories(SeaScene PUBLIC
@@ -15,6 +21,7 @@ target_include_directories(SeaScene PUBLIC
     ${tinyobjloader_SOURCE_DIR}
     ${stb_SOURCE_DIR}
     ${directxmath_SOURCE_DIR}/Inc
+    ${json_SOURCE_DIR}/include
 )
 
 target_link_libraries(SeaScene PUBLIC
@@ -23,4 +30,5 @@ target_link_libraries(SeaScene PUBLIC
     SeaShader
     tinyobjloader
     DirectXMath
+    nlohmann_json::nlohmann_json
 )

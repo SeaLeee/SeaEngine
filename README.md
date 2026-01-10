@@ -9,6 +9,12 @@
 
 一个轻量级的游戏渲染引擎，类似 NVIDIA Falcor，专注于渲染效果预研和可视化管线编辑。
 
+## 📸 编辑器截图
+
+<p align="center">
+  <img src="screenshot/editortest.png" alt="SeaEngine Editor" width="100%">
+</p>
+
 ## ✨ 主要特性
 
 ### 🎨 图形化渲染管线编辑器

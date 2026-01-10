@@ -1,0 +1,121 @@
+{
+  "name": "Cornell Box",
+  "description": "Classic Cornell Box scene for testing global illumination",
+  "author": "SeaEngine",
+  "version": "1.0",
+  "camera": {
+    "position": [0, 2.5, -5],
+    "target": [0, 2.5, 0],
+    "fov": 50,
+    "near": 0.1,
+    "far": 100
+  },
+  "environment": {
+    "ambient": [0.02, 0.02, 0.02],
+    "clearColor": [0.0, 0.0, 0.0, 1.0],
+    "showGrid": false
+  },
+  "lights": [
+    {
+      "type": "directional",
+      "position": [0, 4.9, 0],
+      "direction": [0, -1, 0],
+      "color": [1.0, 0.95, 0.85],
+      "intensity": 3.0
+    }
+  ],
+  "objects": [
+    {
+      "name": "Floor",
+      "type": "cube",
+      "position": [0, 0, 0],
+      "scale": [5, 0.1, 5],
+      "material": {
+        "color": [0.73, 0.73, 0.73, 1.0],
+        "metallic": 0.0,
+        "roughness": 0.9
+      }
+    },
+    {
+      "name": "Ceiling",
+      "type": "cube",
+      "position": [0, 5, 0],
+      "scale": [5, 0.1, 5],
+      "material": {
+        "color": [0.73, 0.73, 0.73, 1.0],
+        "metallic": 0.0,
+        "roughness": 0.9
+      }
+    },
+    {
+      "name": "Back Wall",
+      "type": "cube",
+      "position": [0, 2.5, 2.5],
+      "scale": [5, 5, 0.1],
+      "material": {
+        "color": [0.73, 0.73, 0.73, 1.0],
+        "metallic": 0.0,
+        "roughness": 0.9
+      }
+    },
+    {
+      "name": "Left Wall (Red)",
+      "type": "cube",
+      "position": [-2.5, 2.5, 0],
+      "scale": [0.1, 5, 5],
+      "material": {
+        "color": [0.63, 0.06, 0.04, 1.0],
+        "metallic": 0.0,
+        "roughness": 0.9
+      }
+    },
+    {
+      "name": "Right Wall (Green)",
+      "type": "cube",
+      "position": [2.5, 2.5, 0],
+      "scale": [0.1, 5, 5],
+      "material": {
+        "color": [0.15, 0.45, 0.09, 1.0],
+        "metallic": 0.0,
+        "roughness": 0.9
+      }
+    },
+    {
+      "name": "Tall Box",
+      "type": "cube",
+      "position": [-0.9, 1.5, 0.8],
+      "rotation": [0, 15, 0],
+      "scale": [1.3, 3.0, 1.3],
+      "material": {
+        "color": [0.73, 0.73, 0.73, 1.0],
+        "metallic": 0.0,
+        "roughness": 0.8
+      }
+    },
+    {
+      "name": "Short Box",
+      "type": "cube",
+      "position": [0.9, 0.75, -0.5],
+      "rotation": [0, -18, 0],
+      "scale": [1.3, 1.5, 1.3],
+      "material": {
+        "color": [0.73, 0.73, 0.73, 1.0],
+        "metallic": 0.0,
+        "roughness": 0.8
+      }
+    },
+    {
+      "name": "Light Panel",
+      "type": "cube",
+      "position": [0, 4.94, 0],
+      "scale": [1.3, 0.02, 1.05],
+      "material": {
+        "color": [1.0, 1.0, 1.0, 1.0],
+        "metallic": 0.0,
+        "roughness": 1.0,
+        "emissive": [1.0, 0.95, 0.85],
+        "emissiveIntensity": 15.0
+      }
+    }
+  ]
+}

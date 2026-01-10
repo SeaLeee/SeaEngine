@@ -1,4 +1,4 @@
-#pragma once
+ #pragma once
 
 #include "Graphics/GraphicsTypes.h"
 #include "Core/Types.h"

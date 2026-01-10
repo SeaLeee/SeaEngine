@@ -239,9 +239,10 @@ namespace Sea
             return false;
         }
 
-        // Object constant buffer
+        // Object constant buffer - 足够大以容纳所有对象
+        // 每个对象的常量数据需要 256 字节对齐
         BufferDesc objDesc;
-        objDesc.size = (sizeof(ObjectConstants) + 255) & ~255;
+        objDesc.size = OBJECT_CB_ALIGNMENT * MAX_OBJECTS_PER_FRAME;
         objDesc.type = BufferType::Constant;
         m_ObjectConstantBuffer = MakeScope<Buffer>(m_Device, objDesc);
         if (!m_ObjectConstantBuffer->Initialize(nullptr))
@@ -256,6 +257,9 @@ namespace Sea
     void SimpleRenderer::BeginFrame(Camera& camera, f32 time)
     {
         camera.Update();
+        
+        // 重置对象索引
+        m_CurrentObjectIndex = 0;
 
         m_FrameConstants.View = camera.GetViewMatrix();
         m_FrameConstants.Projection = camera.GetProjectionMatrix();
@@ -273,6 +277,13 @@ namespace Sea
     void SimpleRenderer::RenderObject(CommandList& cmdList, const SceneObject& obj)
     {
         if (!obj.mesh) return;
+        
+        // 检查对象索引是否超出限制
+        if (m_CurrentObjectIndex >= MAX_OBJECTS_PER_FRAME)
+        {
+            SEA_CORE_WARN("Too many objects to render in one frame!");
+            return;
+        }
 
         // 更新 object constants
         ObjectConstants objConst = {};
@@ -307,7 +318,9 @@ namespace Sea
         }
         objConst.TextureFlags = 0;  // 暂时不使用贴图
 
-        m_ObjectConstantBuffer->Update(&objConst, sizeof(ObjectConstants));
+        // 计算当前对象在缓冲区中的偏移量
+        u32 objectOffset = m_CurrentObjectIndex * OBJECT_CB_ALIGNMENT;
+        m_ObjectConstantBuffer->Update(&objConst, sizeof(ObjectConstants), objectOffset);
 
         // 设置管线状态
         auto* d3dCmdList = cmdList.GetCommandList();
@@ -323,9 +336,9 @@ namespace Sea
             d3dCmdList->SetPipelineState(m_BasicPSO->GetPipelineState());
         }
 
-        // 设置常量缓冲
+        // 设置常量缓冲 - 使用偏移后的地址
         d3dCmdList->SetGraphicsRootConstantBufferView(0, m_FrameConstantBuffer->GetGPUAddress());
-        d3dCmdList->SetGraphicsRootConstantBufferView(1, m_ObjectConstantBuffer->GetGPUAddress());
+        d3dCmdList->SetGraphicsRootConstantBufferView(1, m_ObjectConstantBuffer->GetGPUAddress() + objectOffset);
 
         // 设置顶点和索引缓冲
         D3D12_VERTEX_BUFFER_VIEW vbv = obj.mesh->GetVertexBuffer()->GetVertexBufferView();
@@ -336,10 +349,19 @@ namespace Sea
 
         // 绘制
         d3dCmdList->DrawIndexedInstanced(obj.mesh->GetIndexCount(), 1, 0, 0, 0);
+        
+        // 增加对象索引
+        m_CurrentObjectIndex++;
     }
 
     void SimpleRenderer::RenderGrid(CommandList& cmdList, Mesh& gridMesh)
     {
+        if (m_CurrentObjectIndex >= MAX_OBJECTS_PER_FRAME)
+        {
+            SEA_CORE_WARN("Too many objects to render grid!");
+            return;
+        }
+        
         auto* d3dCmdList = cmdList.GetCommandList();
         d3dCmdList->SetGraphicsRootSignature(m_RootSignature->GetRootSignature());
         d3dCmdList->SetPipelineState(m_GridPSO->GetPipelineState());
@@ -347,12 +369,15 @@ namespace Sea
         d3dCmdList->SetGraphicsRootConstantBufferView(0, m_FrameConstantBuffer->GetGPUAddress());
 
         // 创建一个单位世界矩阵
-        ObjectConstants objConst;
+        ObjectConstants objConst = {};
         XMStoreFloat4x4(&objConst.World, XMMatrixIdentity());
         XMStoreFloat4x4(&objConst.WorldInvTranspose, XMMatrixIdentity());
         objConst.BaseColor = { 1, 1, 1, 1 };
-        m_ObjectConstantBuffer->Update(&objConst, sizeof(ObjectConstants));
-        d3dCmdList->SetGraphicsRootConstantBufferView(1, m_ObjectConstantBuffer->GetGPUAddress());
+        
+        // 使用偏移量
+        u32 objectOffset = m_CurrentObjectIndex * OBJECT_CB_ALIGNMENT;
+        m_ObjectConstantBuffer->Update(&objConst, sizeof(ObjectConstants), objectOffset);
+        d3dCmdList->SetGraphicsRootConstantBufferView(1, m_ObjectConstantBuffer->GetGPUAddress() + objectOffset);
 
         D3D12_VERTEX_BUFFER_VIEW vbv = gridMesh.GetVertexBuffer()->GetVertexBufferView();
         D3D12_INDEX_BUFFER_VIEW ibv = gridMesh.GetIndexBuffer()->GetIndexBufferView();
@@ -361,5 +386,7 @@ namespace Sea
         d3dCmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
         d3dCmdList->DrawIndexedInstanced(gridMesh.GetIndexCount(), 1, 0, 0, 0);
+        
+        m_CurrentObjectIndex++;
     }
 }

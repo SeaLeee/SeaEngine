@@ -3,8 +3,8 @@
 
 cbuffer ObjectConstants : register(b1)
 {
-    float4x4 g_WorldMatrix;
-    float4x4 g_WorldInvTranspose;
+    row_major float4x4 g_WorldMatrix;
+    row_major float4x4 g_WorldInvTranspose;
 }
 
 PSInput main(VSInput input)

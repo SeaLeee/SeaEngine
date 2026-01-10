@@ -7,6 +7,8 @@
 #include "Editor/EditorModule.h"
 #include "Scene/Scene.h"
 #include "Scene/SceneRenderer.h"
+#include "Scene/SceneManager.h"
+#include "Scene/Ocean.h"
 
 namespace Sea
 {
@@ -44,9 +46,16 @@ namespace Sea
         // 3D 场景
         Scope<SimpleRenderer> m_Renderer;
         Scope<Camera> m_Camera;
+        Scope<SceneManager> m_SceneManager;
+        Scope<Ocean> m_Ocean;
+        bool m_OceanSceneActive = false;
         Scope<Mesh> m_GridMesh;
         std::vector<Scope<Mesh>> m_Meshes;
         std::vector<SceneObject> m_SceneObjects;
+        
+        // 场景选择
+        int m_SelectedSceneIndex = 0;
+        bool m_ShowSceneSelector = false;
         
         // 外部模型
         std::vector<std::string> m_AvailableModels;
@@ -73,6 +82,9 @@ namespace Sea
         // 帧同步
         std::vector<u64> m_FrameFenceValues;
         u32 m_FrameIndex = 0;
+        
+        // RenderDoc 截帧状态
+        bool m_PendingCapture = false;
 
         // 编辑器状态
         bool m_FirstFrame = true;
