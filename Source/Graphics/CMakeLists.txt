@@ -12,6 +12,7 @@ add_library(SeaGraphics STATIC
     Fence.cpp
     GPUResource.cpp
     RenderDocCapture.cpp
+    Material.cpp
 )
 
 target_include_directories(SeaGraphics PUBLIC 

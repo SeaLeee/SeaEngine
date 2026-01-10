@@ -35,6 +35,7 @@ namespace Sea
         m_ObjectConstantBuffer.reset();
         m_FrameConstantBuffer.reset();
         m_GridPSO.reset();
+        m_PBRPSO.reset();
         m_BasicPSO.reset();
         m_RootSignature.reset();
     }
@@ -173,6 +174,55 @@ namespace Sea
             return false;
         }
 
+        // PBR shader
+        std::string pbrShaderPath = "Shaders/PBR.hlsl";
+        
+        ShaderCompileDesc pbrVsDesc;
+        pbrVsDesc.filePath = pbrShaderPath;
+        pbrVsDesc.entryPoint = "VSMainSimple";  // 使用简化版 (自动生成切线)
+        pbrVsDesc.stage = ShaderStage::Vertex;
+        pbrVsDesc.model = ShaderModel::SM_6_0;
+        auto pbrVsResult = ShaderCompiler::Compile(pbrVsDesc);
+
+        ShaderCompileDesc pbrPsDesc;
+        pbrPsDesc.filePath = pbrShaderPath;
+        pbrPsDesc.entryPoint = "PSMain";
+        pbrPsDesc.stage = ShaderStage::Pixel;
+        pbrPsDesc.model = ShaderModel::SM_6_0;
+        auto pbrPsResult = ShaderCompiler::Compile(pbrPsDesc);
+
+        if (!pbrVsResult.success || !pbrPsResult.success)
+        {
+            SEA_CORE_WARN("Failed to compile PBR shaders: {} {} - falling back to Basic", 
+                         pbrVsResult.errors, pbrPsResult.errors);
+            // 如果 PBR 编译失败，使用 Basic 作为后备
+            m_PBRPSO = m_BasicPSO;
+        }
+        else
+        {
+            GraphicsPipelineDesc pbrDesc;
+            pbrDesc.rootSignature = m_RootSignature.get();
+            pbrDesc.vertexShader = pbrVsResult.bytecode;
+            pbrDesc.pixelShader = pbrPsResult.bytecode;
+            pbrDesc.inputLayout = inputLayout;
+            pbrDesc.rtvFormats = { Format::R8G8B8A8_UNORM };
+            pbrDesc.dsvFormat = Format::D32_FLOAT;
+            pbrDesc.depthEnable = true;
+            pbrDesc.depthWrite = true;
+            pbrDesc.cullMode = CullMode::Back;
+
+            m_PBRPSO = PipelineState::CreateGraphics(m_Device, pbrDesc);
+            if (!m_PBRPSO)
+            {
+                SEA_CORE_WARN("Failed to create PBR PSO, falling back to Basic");
+                m_PBRPSO = m_BasicPSO;
+            }
+            else
+            {
+                SEA_CORE_INFO("PBR pipeline created successfully");
+            }
+        }
+
         return true;
     }
 
@@ -225,7 +275,7 @@ namespace Sea
         if (!obj.mesh) return;
 
         // 更新 object constants
-        ObjectConstants objConst;
+        ObjectConstants objConst = {};
         objConst.World = obj.transform;
         
         // 计算逆转置矩阵用于法线变换
@@ -233,16 +283,45 @@ namespace Sea
         XMMATRIX worldInvTrans = XMMatrixTranspose(XMMatrixInverse(nullptr, world));
         XMStoreFloat4x4(&objConst.WorldInvTranspose, worldInvTrans);
         
-        objConst.BaseColor = obj.color;
-        objConst.Metallic = obj.metallic;
-        objConst.Roughness = obj.roughness;
+        // 使用材质或直接参数
+        if (obj.material)
+        {
+            const auto& params = obj.material->GetParams();
+            objConst.BaseColor = params.albedo;
+            objConst.Metallic = params.metallic;
+            objConst.Roughness = params.roughness;
+            objConst.AO = params.ao;
+            objConst.EmissiveIntensity = params.emissiveIntensity;
+            objConst.EmissiveColor = params.emissiveColor;
+            objConst.NormalScale = params.normalScale;
+        }
+        else
+        {
+            objConst.BaseColor = obj.color;
+            objConst.Metallic = obj.metallic;
+            objConst.Roughness = obj.roughness;
+            objConst.AO = obj.ao;
+            objConst.EmissiveIntensity = obj.emissiveIntensity;
+            objConst.EmissiveColor = obj.emissiveColor;
+            objConst.NormalScale = 1.0f;
+        }
+        objConst.TextureFlags = 0;  // 暂时不使用贴图
 
         m_ObjectConstantBuffer->Update(&objConst, sizeof(ObjectConstants));
 
         // 设置管线状态
         auto* d3dCmdList = cmdList.GetCommandList();
         d3dCmdList->SetGraphicsRootSignature(m_RootSignature->GetRootSignature());
-        d3dCmdList->SetPipelineState(m_BasicPSO->GetPipelineState());
+        
+        // 选择 PBR 或 Basic 管线
+        if (m_UsePBR && m_PBRPSO)
+        {
+            d3dCmdList->SetPipelineState(m_PBRPSO->GetPipelineState());
+        }
+        else
+        {
+            d3dCmdList->SetPipelineState(m_BasicPSO->GetPipelineState());
+        }
 
         // 设置常量缓冲
         d3dCmdList->SetGraphicsRootConstantBufferView(0, m_FrameConstantBuffer->GetGPUAddress());

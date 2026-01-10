@@ -194,14 +194,18 @@ namespace Sea
         {
             int nodeId = GetNodeIdForPass(pass.GetId());
 
-            // 首次渲染时设置位置
-            if (pass.GetPosX() == 0 && pass.GetPosY() == 0)
+            // 只在首次渲染时设置位置，之后让 imnodes 管理拖动
+            if (m_InitializedNodes.find(nodeId) == m_InitializedNodes.end())
             {
-                ImNodes::SetNodeGridSpacePos(nodeId, ImVec2(200.0f + pass.GetId() * 200.0f, 100.0f));
-            }
-            else
-            {
-                ImNodes::SetNodeGridSpacePos(nodeId, ImVec2(pass.GetPosX(), pass.GetPosY()));
+                if (pass.GetPosX() == 0 && pass.GetPosY() == 0)
+                {
+                    ImNodes::SetNodeGridSpacePos(nodeId, ImVec2(200.0f + pass.GetId() * 200.0f, 100.0f));
+                }
+                else
+                {
+                    ImNodes::SetNodeGridSpacePos(nodeId, ImVec2(pass.GetPosX(), pass.GetPosY()));
+                }
+                m_InitializedNodes.insert(nodeId);
             }
 
             // 根据Pass类型设置颜色
@@ -278,13 +282,18 @@ namespace Sea
         {
             int nodeId = GetNodeIdForResource(res.GetId());
 
-            if (res.GetPosX() == 0 && res.GetPosY() == 0)
+            // 只在首次渲染时设置位置
+            if (m_InitializedNodes.find(nodeId) == m_InitializedNodes.end())
             {
-                ImNodes::SetNodeGridSpacePos(nodeId, ImVec2(50.0f, 50.0f + res.GetId() * 100.0f));
-            }
-            else
-            {
-                ImNodes::SetNodeGridSpacePos(nodeId, ImVec2(res.GetPosX(), res.GetPosY()));
+                if (res.GetPosX() == 0 && res.GetPosY() == 0)
+                {
+                    ImNodes::SetNodeGridSpacePos(nodeId, ImVec2(50.0f, 50.0f + res.GetId() * 100.0f));
+                }
+                else
+                {
+                    ImNodes::SetNodeGridSpacePos(nodeId, ImVec2(res.GetPosX(), res.GetPosY()));
+                }
+                m_InitializedNodes.insert(nodeId);
             }
 
             // 资源节点使用绿色系，外部资源使用橙色
@@ -689,11 +698,15 @@ namespace Sea
         m_Graph.Clear();
         m_SelectedPassId = UINT32_MAX;
         m_SelectedResourceId = UINT32_MAX;
+        m_InitializedNodes.clear();
         SEA_CORE_INFO("Cleared all nodes");
     }
 
     void NodeEditor::AutoLayout()
     {
+        // 清除初始化状态，让位置重新应用
+        m_InitializedNodes.clear();
+        
         // 简单的自动布局：按执行顺序排列
         const auto& passes = m_Graph.GetPasses();
         const auto& resources = m_Graph.GetResources();

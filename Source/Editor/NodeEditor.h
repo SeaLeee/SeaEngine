@@ -4,6 +4,7 @@
 #include "RenderGraph/PassTemplate.h"
 #include <imnodes.h>
 #include <functional>
+#include <unordered_set>
 
 namespace Sea
 {
@@ -88,5 +89,8 @@ namespace Sea
         // 编辑状态
         bool m_IsDragging = false;
         bool m_NeedsAutoLayout = false;
+        
+        // 节点位置初始化跟踪
+        std::unordered_set<int> m_InitializedNodes;
     };
 }
