@@ -64,6 +64,58 @@ namespace Sea
         tonemap.outputFormats = { Format::R8G8B8A8_UNORM };
         s_Templates["Tonemap"] = tonemap;
 
+        // Bloom 阈值提取模板
+        PassTemplate bloomThreshold;
+        bloomThreshold.name = "Bloom Threshold";
+        bloomThreshold.type = PassTemplateType::Bloom;
+        bloomThreshold.passType = PassType::Graphics;
+        bloomThreshold.inputSlots = { "HDR" };
+        bloomThreshold.outputSlots = { "Bloom0" };
+        bloomThreshold.vertexShaderPath = "Shaders/Fullscreen_VS.hlsl";
+        bloomThreshold.pixelShaderPath = "Shaders/PostProcess/Bloom_Threshold_PS.hlsl";
+        bloomThreshold.depthEnable = false;
+        bloomThreshold.outputFormats = { Format::R16G16B16A16_FLOAT };
+        s_Templates["Bloom Threshold"] = bloomThreshold;
+
+        // Bloom 降采样模板
+        PassTemplate bloomDownsample;
+        bloomDownsample.name = "Bloom Downsample";
+        bloomDownsample.type = PassTemplateType::Bloom;
+        bloomDownsample.passType = PassType::Graphics;
+        bloomDownsample.inputSlots = { "Input" };
+        bloomDownsample.outputSlots = { "Output" };
+        bloomDownsample.vertexShaderPath = "Shaders/Fullscreen_VS.hlsl";
+        bloomDownsample.pixelShaderPath = "Shaders/PostProcess/Bloom_Downsample_PS.hlsl";
+        bloomDownsample.depthEnable = false;
+        bloomDownsample.outputFormats = { Format::R16G16B16A16_FLOAT };
+        s_Templates["Bloom Downsample"] = bloomDownsample;
+
+        // Bloom 升采样模板
+        PassTemplate bloomUpsample;
+        bloomUpsample.name = "Bloom Upsample";
+        bloomUpsample.type = PassTemplateType::Bloom;
+        bloomUpsample.passType = PassType::Graphics;
+        bloomUpsample.inputSlots = { "LowRes", "HighRes" };
+        bloomUpsample.outputSlots = { "Output" };
+        bloomUpsample.vertexShaderPath = "Shaders/Fullscreen_VS.hlsl";
+        bloomUpsample.pixelShaderPath = "Shaders/PostProcess/Bloom_Upsample_PS.hlsl";
+        bloomUpsample.depthEnable = false;
+        bloomUpsample.outputFormats = { Format::R16G16B16A16_FLOAT };
+        s_Templates["Bloom Upsample"] = bloomUpsample;
+
+        // Bloom 合成模板
+        PassTemplate bloomComposite;
+        bloomComposite.name = "Bloom Composite";
+        bloomComposite.type = PassTemplateType::Bloom;
+        bloomComposite.passType = PassType::Graphics;
+        bloomComposite.inputSlots = { "Scene", "Bloom" };
+        bloomComposite.outputSlots = { "Output" };
+        bloomComposite.vertexShaderPath = "Shaders/Fullscreen_VS.hlsl";
+        bloomComposite.pixelShaderPath = "Shaders/PostProcess/Bloom_Composite_PS.hlsl";
+        bloomComposite.depthEnable = false;
+        bloomComposite.outputFormats = { Format::R16G16B16A16_FLOAT };
+        s_Templates["Bloom Composite"] = bloomComposite;
+
         // 模糊计算模板
         PassTemplate blur;
         blur.name = "Blur (Compute)";

@@ -9,6 +9,7 @@
 #include "Scene/SceneRenderer.h"
 #include "Scene/SceneManager.h"
 #include "Scene/Ocean.h"
+#include "Scene/SkyRenderer.h"
 
 namespace Sea
 {
@@ -48,6 +49,7 @@ namespace Sea
         Scope<Camera> m_Camera;
         Scope<SceneManager> m_SceneManager;
         Scope<Ocean> m_Ocean;
+        Scope<SkyRenderer> m_SkyRenderer;
         bool m_OceanSceneActive = false;
         Scope<Mesh> m_GridMesh;
         std::vector<Scope<Mesh>> m_Meshes;
@@ -94,6 +96,7 @@ namespace Sea
         bool m_ShowInspector = true;
         bool m_ShowConsole = true;
         bool m_ShowAssetBrowser = true;
+        bool m_ShowRenderSettings = true;
         
         // 编辑器方法
         void SetupEditorLayout();
@@ -105,6 +108,7 @@ namespace Sea
         void RenderInspector();
         void RenderConsole();
         void RenderAssetBrowser();
+        void RenderRenderSettings();
         bool CreateSceneRenderTarget(u32 width, u32 height);
         void RenderSceneToTexture();
     };

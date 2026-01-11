@@ -233,6 +233,15 @@ namespace Sea
         if (!m_Renderer->Initialize())
             return false;
 
+        // 创建天空渲染器
+        SEA_CORE_INFO("Creating SkyRenderer...");
+        m_SkyRenderer = MakeScope<SkyRenderer>(*m_Device);
+        if (!m_SkyRenderer->Initialize())
+        {
+            SEA_CORE_WARN("Failed to initialize SkyRenderer - Sky will not be rendered");
+            m_SkyRenderer.reset();
+        }
+
         // 创建相机 - 调整位置以观察 PBR 材质球阵列
         m_Camera = MakeScope<Camera>();
         m_Camera->SetPosition({ 0, 8, -12 });
@@ -272,6 +281,14 @@ namespace Sea
 
         // 创建场景管理器
         m_SceneManager = MakeScope<SceneManager>(*m_Device);
+        
+        // 创建天空渲染器
+        m_SkyRenderer = MakeScope<SkyRenderer>(*m_Device);
+        if (!m_SkyRenderer->Initialize())
+        {
+            SEA_CORE_WARN("Failed to initialize SkyRenderer - Sky rendering disabled");
+            m_SkyRenderer.reset();
+        }
         
         // 创建海洋模拟
         m_Ocean = MakeScope<Ocean>(*m_Device);
@@ -399,6 +416,8 @@ namespace Sea
         m_SceneObjects.clear();
         m_Meshes.clear();
         m_GridMesh.reset();
+        m_SkyRenderer.reset();
+        m_Ocean.reset();
         m_Renderer.reset();
         m_Camera.reset();
         
@@ -481,11 +500,12 @@ namespace Sea
 
         // 分配窗口到 dock 位置
         ImGui::DockBuilderDockWindow("Viewport", dock_main_id);
+        ImGui::DockBuilderDockWindow("Node Editor", dock_main_id);  // 和 Viewport 同一层级
         ImGui::DockBuilderDockWindow("Hierarchy", dock_left);
         ImGui::DockBuilderDockWindow("Scene", dock_left_bottom);
         ImGui::DockBuilderDockWindow("Inspector", dock_right);
+        ImGui::DockBuilderDockWindow("Render Settings", dock_right);
         ImGui::DockBuilderDockWindow("Statistics", dock_right_bottom);
-        ImGui::DockBuilderDockWindow("Node Editor", dock_bottom);
         ImGui::DockBuilderDockWindow("Shader Editor", dock_bottom);
         ImGui::DockBuilderDockWindow("Console", dock_bottom);
         ImGui::DockBuilderDockWindow("Asset Browser", dock_bottom);
@@ -528,6 +548,7 @@ namespace Sea
                 ImGui::MenuItem("Inspector", nullptr, &m_ShowInspector);
                 ImGui::MenuItem("Console", nullptr, &m_ShowConsole);
                 ImGui::MenuItem("Asset Browser", nullptr, &m_ShowAssetBrowser);
+                ImGui::MenuItem("Render Settings", nullptr, &m_ShowRenderSettings);
                 ImGui::Separator();
                 ImGui::MenuItem("ImGui Demo", nullptr, &m_ShowDemoWindow);
                 ImGui::EndMenu();
@@ -1121,6 +1142,251 @@ namespace Sea
         ImGui::End();
     }
 
+    void SampleApp::RenderRenderSettings()
+    {
+        if (!m_ShowRenderSettings) return;
+        
+        if (ImGui::Begin("Render Settings", &m_ShowRenderSettings))
+        {
+            // 天空和大气设置
+            if (ImGui::CollapsingHeader("Sky & Atmosphere", ImGuiTreeNodeFlags_DefaultOpen))
+            {
+                if (m_SkyRenderer)
+                {
+                    auto& settings = m_SkyRenderer->GetSettings();
+                    
+                    ImGui::Checkbox("Enable Sky", &settings.EnableSky);
+                    ImGui::Checkbox("Enable Atmosphere", &settings.EnableAtmosphere);
+                    ImGui::Checkbox("Enable Clouds", &settings.EnableClouds);
+                    
+                    ImGui::Separator();
+                    ImGui::Text("Sun Settings");
+                    
+                    // 时间控制
+                    float timeOfDay = m_SkyRenderer->GetTimeOfDay();
+                    if (ImGui::SliderFloat("Time of Day", &timeOfDay, 0.0f, 24.0f, "%.1f h"))
+                    {
+                        m_SkyRenderer->SetTimeOfDay(timeOfDay);
+                    }
+                    
+                    bool autoTime = m_SkyRenderer->GetAutoTimeProgress();
+                    if (ImGui::Checkbox("Auto Time Progress", &autoTime))
+                    {
+                        m_SkyRenderer->SetAutoTimeProgress(autoTime);
+                    }
+                    
+                    // 太阳方向控制
+                    float azimuth = m_SkyRenderer->GetSunAzimuth();
+                    float elevation = m_SkyRenderer->GetSunElevation();
+                    if (ImGui::SliderFloat("Sun Azimuth", &azimuth, 0.0f, 360.0f, "%.1f deg"))
+                    {
+                        m_SkyRenderer->SetSunAzimuth(azimuth);
+                    }
+                    if (ImGui::SliderFloat("Sun Elevation", &elevation, -20.0f, 90.0f, "%.1f deg"))
+                    {
+                        m_SkyRenderer->SetSunElevation(elevation);
+                    }
+                    
+                    ImGui::DragFloat("Sun Intensity", &settings.SunIntensity, 0.1f, 0.0f, 20.0f);
+                    ImGui::ColorEdit3("Sun Color", &settings.SunColor.x);
+                    
+                    ImGui::Separator();
+                    ImGui::Text("Atmosphere");
+                    ImGui::DragFloat("Atmosphere Scale", &settings.AtmosphereScale, 0.1f, 0.1f, 5.0f);
+                    ImGui::ColorEdit3("Ground Color", &settings.GroundColor.x);
+                }
+                else
+                {
+                    ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.5f, 1.0f), "Sky Renderer not available");
+                }
+            }
+            
+            // 体积云设置
+            if (ImGui::CollapsingHeader("Volumetric Clouds", ImGuiTreeNodeFlags_DefaultOpen))
+            {
+                if (m_SkyRenderer)
+                {
+                    auto& settings = m_SkyRenderer->GetSettings();
+                    
+                    if (!settings.EnableClouds)
+                    {
+                        ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "Clouds are disabled");
+                    }
+                    else
+                    {
+                        ImGui::SliderFloat("Cloud Coverage", &settings.CloudCoverage, 0.0f, 1.0f);
+                        ImGui::SliderFloat("Cloud Density", &settings.CloudDensity, 0.1f, 3.0f);
+                        ImGui::DragFloat("Cloud Height", &settings.CloudHeight, 100.0f, 500.0f, 10000.0f, "%.0f m");
+                    }
+                }
+            }
+            
+            // 渲染器设置
+            if (ImGui::CollapsingHeader("Renderer", ImGuiTreeNodeFlags_DefaultOpen))
+            {
+                if (m_Renderer)
+                {
+                    bool usePBR = m_Renderer->GetUsePBR();
+                    if (ImGui::Checkbox("Use PBR Pipeline", &usePBR))
+                    {
+                        m_Renderer->SetUsePBR(usePBR);
+                    }
+                }
+            }
+            
+            // 灯光设置
+            if (ImGui::CollapsingHeader("Lighting", ImGuiTreeNodeFlags_DefaultOpen))
+            {
+                if (m_Renderer)
+                {
+                    static XMFLOAT3 lightDir = { -0.5f, -1.0f, 0.5f };
+                    static XMFLOAT3 lightColor = { 1.0f, 0.98f, 0.95f };
+                    static f32 lightIntensity = 2.0f;
+                    static XMFLOAT3 ambientColor = { 0.15f, 0.18f, 0.22f };
+                    
+                    ImGui::Text("Directional Light");
+                    
+                    // 简化的方向控制 - 用角度
+                    static float lightYaw = -30.0f;
+                    static float lightPitch = -60.0f;
+                    bool dirChanged = false;
+                    dirChanged |= ImGui::SliderFloat("Light Yaw", &lightYaw, -180.0f, 180.0f, "%.1f deg");
+                    dirChanged |= ImGui::SliderFloat("Light Pitch", &lightPitch, -90.0f, 0.0f, "%.1f deg");
+                    
+                    if (dirChanged)
+                    {
+                        float yawRad = lightYaw * 3.14159f / 180.0f;
+                        float pitchRad = lightPitch * 3.14159f / 180.0f;
+                        lightDir.x = cosf(pitchRad) * sinf(yawRad);
+                        lightDir.y = sinf(pitchRad);
+                        lightDir.z = cosf(pitchRad) * cosf(yawRad);
+                        m_Renderer->SetLightDirection(lightDir);
+                    }
+                    
+                    if (ImGui::ColorEdit3("Light Color", &lightColor.x))
+                        m_Renderer->SetLightColor(lightColor);
+                    if (ImGui::DragFloat("Light Intensity", &lightIntensity, 0.1f, 0.0f, 20.0f))
+                        m_Renderer->SetLightIntensity(lightIntensity);
+                    
+                    ImGui::Separator();
+                    ImGui::Text("Ambient");
+                    if (ImGui::ColorEdit3("Ambient Color", &ambientColor.x))
+                        m_Renderer->SetAmbientColor(ambientColor);
+                }
+            }
+            
+            // 相机设置
+            if (ImGui::CollapsingHeader("Camera"))
+            {
+                if (m_Camera)
+                {
+                    ImGui::Text("Position: %.2f, %.2f, %.2f", 
+                        m_Camera->GetPosition().x, m_Camera->GetPosition().y, m_Camera->GetPosition().z);
+                    
+                    float moveSpeed = m_Camera->GetMoveSpeed();
+                    if (ImGui::SliderFloat("Move Speed", &moveSpeed, 1.0f, 100.0f, "%.1f"))
+                    {
+                        m_Camera->SetMoveSpeed(moveSpeed);
+                    }
+                    
+                    ImGui::Text("FOV: %.1f", m_Camera->GetFOV());
+                    ImGui::Text("Near/Far: %.2f / %.2f", m_Camera->GetNearZ(), m_Camera->GetFarZ());
+                }
+            }
+            
+            // 后处理设置 - Unreal风格Bloom
+            if (ImGui::CollapsingHeader("Post Processing"))
+            {
+                ImGui::TextColored(ImVec4(0.8f, 0.6f, 0.2f, 1.0f), "Note: Post processing requires RenderGraph implementation");
+                ImGui::Separator();
+                
+                // Bloom设置 (Unreal风格)
+                static bool bloomEnabled = false;
+                static float bloomIntensity = 0.675f;
+                static float bloomThreshold = 1.0f;
+                static float bloomRadius = 1.0f;
+                static float bloomTint[3] = { 1.0f, 1.0f, 1.0f };
+                
+                // 每层Bloom权重 (Unreal有6层)
+                static float bloom1Weight = 0.266f;  // 1/2 res
+                static float bloom2Weight = 0.232f;  // 1/4 res
+                static float bloom3Weight = 0.246f;  // 1/8 res
+                static float bloom4Weight = 0.384f;  // 1/16 res
+                static float bloom5Weight = 0.426f;  // 1/32 res
+                static float bloom6Weight = 0.060f;  // 1/64 res
+                
+                // Tonemapping设置
+                static bool tonemapEnabled = true;
+                static int tonemapOperator = 0;
+                const char* tonemapOps[] = { "ACES", "Reinhard", "Uncharted 2", "None" };
+                
+                // Color Grading设置
+                static bool colorGradingEnabled = false;
+                static float exposure = 1.0f;
+                static float contrast = 1.0f;
+                static float saturation = 1.0f;
+                
+                // Bloom UI
+                ImGui::Checkbox("Bloom (Unreal Style)", &bloomEnabled);
+                if (bloomEnabled)
+                {
+                    ImGui::Indent();
+                    ImGui::SliderFloat("Intensity", &bloomIntensity, 0.0f, 5.0f, "%.3f");
+                    ImGui::SliderFloat("Threshold", &bloomThreshold, 0.0f, 5.0f, "%.2f");
+                    ImGui::SliderFloat("Radius", &bloomRadius, 0.5f, 4.0f, "%.2f");
+                    ImGui::ColorEdit3("Tint", bloomTint);
+                    
+                    if (ImGui::TreeNode("Per-Mip Weights"))
+                    {
+                        ImGui::SliderFloat("1/2 Res", &bloom1Weight, 0.0f, 1.0f);
+                        ImGui::SliderFloat("1/4 Res", &bloom2Weight, 0.0f, 1.0f);
+                        ImGui::SliderFloat("1/8 Res", &bloom3Weight, 0.0f, 1.0f);
+                        ImGui::SliderFloat("1/16 Res", &bloom4Weight, 0.0f, 1.0f);
+                        ImGui::SliderFloat("1/32 Res", &bloom5Weight, 0.0f, 1.0f);
+                        ImGui::SliderFloat("1/64 Res", &bloom6Weight, 0.0f, 1.0f);
+                        
+                        if (ImGui::Button("Reset to Default"))
+                        {
+                            bloom1Weight = 0.266f;
+                            bloom2Weight = 0.232f;
+                            bloom3Weight = 0.246f;
+                            bloom4Weight = 0.384f;
+                            bloom5Weight = 0.426f;
+                            bloom6Weight = 0.060f;
+                        }
+                        ImGui::TreePop();
+                    }
+                    ImGui::Unindent();
+                }
+                
+                ImGui::Separator();
+                
+                // Tonemapping UI
+                ImGui::Checkbox("Tone Mapping", &tonemapEnabled);
+                if (tonemapEnabled)
+                {
+                    ImGui::Indent();
+                    ImGui::Combo("Operator", &tonemapOperator, tonemapOps, 4);
+                    ImGui::SliderFloat("Exposure", &exposure, 0.1f, 5.0f);
+                    ImGui::Unindent();
+                }
+                
+                ImGui::Separator();
+                
+                // Color Grading UI
+                ImGui::Checkbox("Color Grading", &colorGradingEnabled);
+                if (colorGradingEnabled)
+                {
+                    ImGui::Indent();
+                    ImGui::SliderFloat("Contrast", &contrast, 0.5f, 2.0f);
+                    ImGui::SliderFloat("Saturation", &saturation, 0.0f, 2.0f);
+                    ImGui::Unindent();
+                }
+            }
+        }
+        ImGui::End();
+    }
+
     void SampleApp::OnUpdate(f32 deltaTime)
     {
         Input::Update();
@@ -1159,6 +1425,12 @@ namespace Sea
 
         // 更新相机
         UpdateCamera(deltaTime);
+
+        // 更新天空渲染器
+        if (m_SkyRenderer)
+        {
+            m_SkyRenderer->Update(deltaTime);
+        }
 
         m_ImGuiRenderer->BeginFrame();
 
@@ -1207,6 +1479,7 @@ namespace Sea
         RenderInspector();
         RenderConsole();
         RenderAssetBrowser();
+        RenderRenderSettings();
         
         // 原有的编辑器面板
         m_NodeEditor->Render();
@@ -1300,6 +1573,12 @@ namespace Sea
 
             // 开始3D渲染
             m_Renderer->BeginFrame(*m_Camera, m_TotalTime);
+
+            // 首先渲染天空（如果启用）
+            if (m_SkyRenderer && m_SkyRenderer->GetSettings().EnableSky)
+            {
+                m_SkyRenderer->Render(*cmdList, *m_Camera);
+            }
 
             // 根据场景类型渲染
             if (m_OceanSceneActive && m_Ocean)

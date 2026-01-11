@@ -14,6 +14,8 @@ add_library(SeaScene STATIC
     SceneManager.h
     Ocean.cpp
     Ocean.h
+    SkyRenderer.cpp
+    SkyRenderer.h
 )
 
 target_include_directories(SeaScene PUBLIC
