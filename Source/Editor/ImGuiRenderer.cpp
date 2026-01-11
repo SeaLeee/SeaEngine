@@ -37,11 +37,27 @@ namespace Sea
         io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
         io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
 
+        // DPI 缩放支持 - 远程桌面时特别重要
+        float dpiScale = 1.0f;
+        HDC hdc = GetDC(m_Window.GetHandle());
+        if (hdc)
+        {
+            int dpi = GetDeviceCaps(hdc, LOGPIXELSX);
+            dpiScale = dpi / 96.0f;  // 96 是标准 DPI
+            ReleaseDC(m_Window.GetHandle(), hdc);
+        }
+        
+        // 应用字体缩放
+        io.FontGlobalScale = dpiScale;
+
         ImGui::StyleColorsDark();
         ImGuiStyle& style = ImGui::GetStyle();
         style.WindowRounding = 5.0f;
         style.FrameRounding = 3.0f;
         style.Colors[ImGuiCol_WindowBg].w = 0.95f;
+        
+        // 缩放 UI 元素
+        style.ScaleAllSizes(dpiScale);
 
         ImGui_ImplWin32_Init(m_Window.GetHandle());
         ImGui_ImplDX12_Init(m_Device.GetDevice(), numFrames,

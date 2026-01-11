@@ -18,7 +18,7 @@ namespace Sea
     class NodeEditor : public NonCopyable
     {
     public:
-        NodeEditor(RenderGraph& graph, Device* device = nullptr);
+        NodeEditor(RenderGraph* graph, Device* device = nullptr);
         ~NodeEditor();
 
         void Initialize();
@@ -27,6 +27,9 @@ namespace Sea
 
         // 设置设备引用（用于创建资源）
         void SetDevice(Device* device) { m_Device = device; }
+        
+        // 设置RenderGraph（用于管线切换时更新）
+        void SetRenderGraph(RenderGraph* graph) { m_Graph = graph; m_InitializedNodes.clear(); }
 
         // 节点操作
         void AddPassNode(const std::string& name, PassType type);
@@ -73,7 +76,7 @@ namespace Sea
         bool IsResourceNode(int nodeId) const { return nodeId >= 1000; }
 
     private:
-        RenderGraph& m_Graph;
+        RenderGraph* m_Graph = nullptr;
         Device* m_Device = nullptr;
         ImNodesContext* m_Context = nullptr;
 

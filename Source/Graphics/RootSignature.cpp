@@ -36,7 +36,7 @@ namespace Sea
                 params[i].Descriptor = { p.shaderRegister, p.registerSpace };
                 break;
             case RootParameterDesc::DescriptorTable:
-                ranges[i] = { D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, p.shaderRegister, p.registerSpace, D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND };
+                ranges[i] = { p.rangeType, p.numDescriptors, p.shaderRegister, p.registerSpace, D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND };
                 params[i].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
                 params[i].DescriptorTable = { 1, &ranges[i] };
                 break;

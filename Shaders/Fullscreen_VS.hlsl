@@ -7,7 +7,7 @@ struct VSOutput
     float2 TexCoord : TEXCOORD0;
 };
 
-VSOutput main(uint vertexID : SV_VertexID)
+VSOutput VSMain(uint vertexID : SV_VertexID)
 {
     VSOutput output;
     
@@ -17,4 +17,10 @@ VSOutput main(uint vertexID : SV_VertexID)
     output.Position = float4(output.TexCoord * float2(2.0, -2.0) + float2(-1.0, 1.0), 0.0, 1.0);
     
     return output;
+}
+
+// Alias for compatibility
+VSOutput main(uint vertexID : SV_VertexID)
+{
+    return VSMain(vertexID);
 }

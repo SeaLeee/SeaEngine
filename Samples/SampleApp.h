@@ -10,9 +10,17 @@
 #include "Scene/SceneManager.h"
 #include "Scene/Ocean.h"
 #include "Scene/SkyRenderer.h"
+#include "Scene/BloomRenderer.h"
+#include "Scene/DeferredRenderer.h"
 
 namespace Sea
 {
+    // 渲染管线类型
+    enum class RenderPipeline
+    {
+        Forward,
+        Deferred
+    };
     class SampleApp : public Application
     {
     public:
@@ -50,6 +58,9 @@ namespace Sea
         Scope<SceneManager> m_SceneManager;
         Scope<Ocean> m_Ocean;
         Scope<SkyRenderer> m_SkyRenderer;
+        Scope<BloomRenderer> m_BloomRenderer;
+        Scope<DeferredRenderer> m_DeferredRenderer;
+        RenderPipeline m_CurrentPipeline = RenderPipeline::Forward;
         bool m_OceanSceneActive = false;
         Scope<Mesh> m_GridMesh;
         std::vector<Scope<Mesh>> m_Meshes;

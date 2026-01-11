@@ -8,7 +8,7 @@
 
 namespace Sea
 {
-    NodeEditor::NodeEditor(RenderGraph& graph, Device* device) 
+    NodeEditor::NodeEditor(RenderGraph* graph, Device* device) 
         : m_Graph(graph), m_Device(device) 
     {
     }
@@ -41,7 +41,7 @@ namespace Sea
         style.PinLineThickness = 2.0f;
         style.LinkThickness = 3.0f;
         
-        // 启用属性
+        // 启用属�?
         ImNodes::PushAttributeFlag(ImNodesAttributeFlags_EnableLinkDetachWithDragClick);
         
         SEA_CORE_INFO("Node Editor initialized");
@@ -61,7 +61,7 @@ namespace Sea
     {
         ImGui::Begin("Render Graph Editor", nullptr, ImGuiWindowFlags_MenuBar);
 
-        // 菜单栏
+        // 菜单�?
         if (ImGui::BeginMenuBar())
         {
             if (ImGui::BeginMenu("Graph"))
@@ -86,7 +86,7 @@ namespace Sea
                 ImGui::Separator();
                 if (ImGui::MenuItem("Compile", "Ctrl+B"))
                 {
-                    if (m_Graph.Compile())
+                    if (m_Graph->Compile())
                         SEA_CORE_INFO("Graph compiled successfully");
                 }
                 if (ImGui::MenuItem("Auto Layout", "Ctrl+L"))
@@ -117,10 +117,10 @@ namespace Sea
             ImGui::EndMenuBar();
         }
 
-        // 工具栏
+        // 工具�?
         if (ImGui::Button("Compile"))
         {
-            m_Graph.Compile();
+            m_Graph->Compile();
         }
         ImGui::SameLine();
         if (ImGui::Button("Auto Layout"))
@@ -129,8 +129,8 @@ namespace Sea
         }
         ImGui::SameLine();
         
-        // 显示编译状态
-        const auto& result = m_Graph.GetLastCompileResult();
+        // 显示编译状�?
+        const auto& result = m_Graph->GetLastCompileResult();
         if (result.success)
         {
             ImGui::TextColored(ImVec4(0.3f, 0.8f, 0.3f, 1.0f), "Compiled (%zu passes)", result.executionOrder.size());
@@ -166,7 +166,7 @@ namespace Sea
 
     void NodeEditor::RenderPassTemplateMenu()
     {
-        // 预定义模板
+        // 预定义模�?
         auto templates = PassTemplateLibrary::GetTemplateNames();
         for (const auto& name : templates)
         {
@@ -178,7 +178,7 @@ namespace Sea
         
         ImGui::Separator();
         
-        // 自定义类型
+        // 自定义类�?
         if (ImGui::MenuItem("Custom Graphics Pass"))
             AddPassNode("Graphics Pass", PassType::Graphics);
         if (ImGui::MenuItem("Custom Compute Pass"))
@@ -190,11 +190,11 @@ namespace Sea
     void NodeEditor::RenderNodes()
     {
         // 渲染Pass节点
-        for (auto& pass : m_Graph.GetPasses())
+        for (auto& pass : m_Graph->GetPasses())
         {
             int nodeId = GetNodeIdForPass(pass.GetId());
 
-            // 只在首次渲染时设置位置，之后让 imnodes 管理拖动
+            // 只在首次渲染时设置位置，之后�?imnodes 管理拖动
             if (m_InitializedNodes.find(nodeId) == m_InitializedNodes.end())
             {
                 if (pass.GetPosX() == 0 && pass.GetPosY() == 0)
@@ -278,11 +278,11 @@ namespace Sea
         }
 
         // 渲染资源节点
-        for (auto& res : m_Graph.GetResources())
+        for (auto& res : m_Graph->GetResources())
         {
             int nodeId = GetNodeIdForResource(res.GetId());
 
-            // 只在首次渲染时设置位置
+            // 只在首次渲染时设置位�?
             if (m_InitializedNodes.find(nodeId) == m_InitializedNodes.end())
             {
                 if (res.GetPosX() == 0 && res.GetPosY() == 0)
@@ -341,8 +341,8 @@ namespace Sea
     {
         int linkId = 0;
         
-        // Pass 输入连接到资源
-        for (const auto& pass : m_Graph.GetPasses())
+        // Pass 输入连接到资�?
+        for (const auto& pass : m_Graph->GetPasses())
         {
             int nodeId = GetNodeIdForPass(pass.GetId());
             const auto& inputs = pass.GetInputs();
@@ -359,8 +359,8 @@ namespace Sea
             }
         }
         
-        // Pass 之间的连接（通过资源）
-        for (const auto& pass : m_Graph.GetPasses())
+        // Pass 之间的连接（通过资源�?
+        for (const auto& pass : m_Graph->GetPasses())
         {
             int nodeId = GetNodeIdForPass(pass.GetId());
             const auto& outputs = pass.GetOutputs();
@@ -369,8 +369,8 @@ namespace Sea
             {
                 if (outputs[i].IsConnected())
                 {
-                    // 找到使用这个资源作为输入的所有 Pass
-                    for (const auto& otherPass : m_Graph.GetPasses())
+                    // 找到使用这个资源作为输入的所�?Pass
+                    for (const auto& otherPass : m_Graph->GetPasses())
                     {
                         if (otherPass.GetId() == pass.GetId()) continue;
                         
@@ -382,7 +382,7 @@ namespace Sea
                                 int startPin = nodeId * 100 + 50 + static_cast<int>(i);
                                 int endPin = GetNodeIdForPass(otherPass.GetId()) * 100 + static_cast<int>(j);
                                 
-                                // 使用不同颜色表示 Pass 之间的连接
+                                // 使用不同颜色表示 Pass 之间的连�?
                                 ImNodes::PushColorStyle(ImNodesCol_Link, IM_COL32(150, 150, 255, 255));
                                 ImNodes::Link(linkId++, startPin, endPin);
                                 ImNodes::PopColorStyle();
@@ -401,7 +401,7 @@ namespace Sea
 
     void NodeEditor::HandleInput()
     {
-        // 键盘快捷键
+        // 键盘快捷�?
         if (ImGui::IsWindowFocused())
         {
             if (ImGui::IsKeyPressed(ImGuiKey_Delete))
@@ -414,7 +414,7 @@ namespace Sea
             }
             if (ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_B))
             {
-                m_Graph.Compile();
+                m_Graph->Compile();
             }
             if (ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_L))
             {
@@ -439,11 +439,11 @@ namespace Sea
                 u32 resourceId = GetResourceIdFromNode(startNodeId);
                 u32 passId = GetPassIdFromNode(endNodeId);
                 
-                PassNode* pass = m_Graph.GetPass(passId);
+                PassNode* pass = m_Graph->GetPass(passId);
                 if (pass && inputSlot < static_cast<int>(pass->GetInputs().size()))
                 {
                     pass->SetInput(static_cast<u32>(inputSlot), resourceId);
-                    m_Graph.MarkDirty();
+                    m_Graph->MarkDirty();
                     SEA_CORE_INFO("Connected resource {} to pass {} input {}", 
                                   resourceId, pass->GetName(), inputSlot);
                 }
@@ -454,21 +454,21 @@ namespace Sea
                 u32 srcPassId = GetPassIdFromNode(startNodeId);
                 u32 dstPassId = GetPassIdFromNode(endNodeId);
                 
-                PassNode* srcPass = m_Graph.GetPass(srcPassId);
-                PassNode* dstPass = m_Graph.GetPass(dstPassId);
+                PassNode* srcPass = m_Graph->GetPass(srcPassId);
+                PassNode* dstPass = m_Graph->GetPass(dstPassId);
                 
                 if (srcPass && dstPass)
                 {
                     const auto& outputs = srcPass->GetOutputs();
                     if (outputSlot < static_cast<int>(outputs.size()))
                     {
-                        // 如果输出槽还没有关联资源，创建一个
+                        // 如果输出槽还没有关联资源，创建一�?
                         u32 resourceId = outputs[outputSlot].resourceId;
                         if (resourceId == UINT32_MAX)
                         {
                             std::string resName = srcPass->GetName() + "_" + outputs[outputSlot].name;
-                            resourceId = m_Graph.CreateResource(resName, ResourceNodeType::Texture2D);
-                            if (auto* res = m_Graph.GetResource(resourceId))
+                            resourceId = m_Graph->CreateResource(resName, ResourceNodeType::Texture2D);
+                            if (auto* res = m_Graph->GetResource(resourceId))
                             {
                                 res->SetDimensions(1920, 1080);
                                 res->SetFormat(Format::R8G8B8A8_UNORM);
@@ -477,7 +477,7 @@ namespace Sea
                         }
                         
                         dstPass->SetInput(static_cast<u32>(inputSlot), resourceId);
-                        m_Graph.MarkDirty();
+                        m_Graph->MarkDirty();
                         SEA_CORE_INFO("Connected pass {} output {} to pass {} input {}", 
                                       srcPass->GetName(), outputSlot, dstPass->GetName(), inputSlot);
                     }
@@ -491,8 +491,8 @@ namespace Sea
         int linkId;
         if (ImNodes::IsLinkDestroyed(&linkId))
         {
-            // 重新编译图
-            m_Graph.MarkDirty();
+            // 重新编译�?
+            m_Graph->MarkDirty();
             SEA_CORE_INFO("Link destroyed, graph marked dirty");
         }
     }
@@ -531,7 +531,7 @@ namespace Sea
 
     void NodeEditor::RenderContextMenu()
     {
-        // 右键打开上下文菜单
+        // 右键打开上下文菜�?
         if (ImNodes::IsEditorHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Right))
         {
             m_ShowContextMenu = true;
@@ -591,16 +591,16 @@ namespace Sea
 
     void NodeEditor::RenderNodeProperties()
     {
-        // 在属性面板中渲染选中节点的属性
+        // 在属性面板中渲染选中节点的属�?
     }
 
     void NodeEditor::AddPassNode(const std::string& name, PassType type)
     {
-        u32 passId = m_Graph.AddPass(name, type);
-        PassNode* pass = m_Graph.GetPass(passId);
+        u32 passId = m_Graph->AddPass(name, type);
+        PassNode* pass = m_Graph->GetPass(passId);
         if (pass)
         {
-            // 设置位置 - 使用简单偏移
+            // 设置位置 - 使用简单偏�?
             float xOffset = 200.0f + (passId % 4) * 220.0f;
             float yOffset = 100.0f + (passId / 4) * 200.0f;
             pass->SetPosition(xOffset, yOffset);
@@ -621,11 +621,11 @@ namespace Sea
             return;
         }
 
-        u32 passId = m_Graph.AddPass(templateName, templ->passType);
-        PassNode* pass = m_Graph.GetPass(passId);
+        u32 passId = m_Graph->AddPass(templateName, templ->passType);
+        PassNode* pass = m_Graph->GetPass(passId);
         if (pass)
         {
-            // 计算节点位置 - 使用简单偏移
+            // 计算节点位置 - 使用简单偏�?
             float xOffset = 200.0f + (passId % 4) * 220.0f;
             float yOffset = 100.0f + (passId / 4) * 200.0f;
             pass->SetPosition(xOffset, yOffset);
@@ -644,8 +644,8 @@ namespace Sea
 
     void NodeEditor::AddResourceNode(const std::string& name, ResourceNodeType type)
     {
-        u32 resId = m_Graph.CreateResource(name, type);
-        ResourceNode* res = m_Graph.GetResource(resId);
+        u32 resId = m_Graph->CreateResource(name, type);
+        ResourceNode* res = m_Graph->GetResource(resId);
         if (res)
         {
             // 计算资源节点位置 - 左侧偏移
@@ -675,10 +675,10 @@ namespace Sea
                 if (!IsResourceNode(nodeId))
                 {
                     u32 passId = GetPassIdFromNode(nodeId);
-                    m_Graph.RemovePass(passId);
+                    m_Graph->RemovePass(passId);
                     SEA_CORE_INFO("Deleted pass node: {}", passId);
                 }
-                // 资源节点暂时不删除，因为可能被引用
+                // 资源节点暂时不删除，因为可能被引�?
             }
             
             ImNodes::ClearNodeSelection();
@@ -695,7 +695,7 @@ namespace Sea
 
     void NodeEditor::ClearAll()
     {
-        m_Graph.Clear();
+        m_Graph->Clear();
         m_SelectedPassId = UINT32_MAX;
         m_SelectedResourceId = UINT32_MAX;
         m_InitializedNodes.clear();
@@ -704,30 +704,30 @@ namespace Sea
 
     void NodeEditor::AutoLayout()
     {
-        // 清除初始化状态，让位置重新应用
+        // 清除初始化状态，让位置重新应�?
         m_InitializedNodes.clear();
         
         // 简单的自动布局：按执行顺序排列
-        const auto& passes = m_Graph.GetPasses();
-        const auto& resources = m_Graph.GetResources();
+        const auto& passes = m_Graph->GetPasses();
+        const auto& resources = m_Graph->GetResources();
         
         // 资源节点放在左边
         float yOffset = 50.0f;
-        for (auto& res : m_Graph.GetResources())
+        for (auto& res : m_Graph->GetResources())
         {
             res.SetPosition(50.0f, yOffset);
             yOffset += 120.0f;
         }
         
-        // Pass 节点按 ID 顺序排列
+        // Pass 节点�?ID 顺序排列
         float xOffset = 300.0f;
         yOffset = 100.0f;
-        for (auto& pass : m_Graph.GetPasses())
+        for (auto& pass : m_Graph->GetPasses())
         {
             pass.SetPosition(xOffset, yOffset);
             xOffset += 220.0f;
             
-            // 每行最多4个
+            // 每行最�?�?
             if ((pass.GetId() + 1) % 4 == 0)
             {
                 xOffset = 300.0f;
@@ -744,14 +744,14 @@ namespace Sea
         float minX = FLT_MAX, minY = FLT_MAX;
         float maxX = -FLT_MAX, maxY = -FLT_MAX;
         
-        for (const auto& pass : m_Graph.GetPasses())
+        for (const auto& pass : m_Graph->GetPasses())
         {
             minX = std::min(minX, pass.GetPosX());
             minY = std::min(minY, pass.GetPosY());
             maxX = std::max(maxX, pass.GetPosX());
             maxY = std::max(maxY, pass.GetPosY());
         }
-        for (const auto& res : m_Graph.GetResources())
+        for (const auto& res : m_Graph->GetResources())
         {
             minX = std::min(minX, res.GetPosX());
             minY = std::min(minY, res.GetPosY());
@@ -769,7 +769,7 @@ namespace Sea
 
     void NodeEditor::SaveToFile(const std::string& path)
     {
-        if (m_Graph.SaveToFile(path))
+        if (m_Graph->SaveToFile(path))
         {
             SEA_CORE_INFO("Graph saved to: {}", path);
         }
@@ -777,7 +777,7 @@ namespace Sea
 
     void NodeEditor::LoadFromFile(const std::string& path)
     {
-        if (m_Graph.LoadFromFile(path))
+        if (m_Graph->LoadFromFile(path))
         {
             SEA_CORE_INFO("Graph loaded from: {}", path);
         }

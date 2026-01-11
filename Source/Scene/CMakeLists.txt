@@ -16,6 +16,10 @@ add_library(SeaScene STATIC
     Ocean.h
     SkyRenderer.cpp
     SkyRenderer.h
+    BloomRenderer.cpp
+    BloomRenderer.h
+    DeferredRenderer.cpp
+    DeferredRenderer.h
 )
 
 target_include_directories(SeaScene PUBLIC

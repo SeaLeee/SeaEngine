@@ -3,7 +3,7 @@
 
 namespace Sea
 {
-    PropertyPanel::PropertyPanel(RenderGraph& graph) : m_Graph(graph) {}
+    PropertyPanel::PropertyPanel(RenderGraph* graph) : m_Graph(graph) {}
 
     void PropertyPanel::Render()
     {
@@ -11,7 +11,7 @@ namespace Sea
 
         if (m_SelectedPass != UINT32_MAX)
         {
-            PassNode* pass = m_Graph.GetPass(m_SelectedPass);
+            PassNode* pass = m_Graph->GetPass(m_SelectedPass);
             if (pass)
             {
                 RenderPassProperties(*pass);
@@ -19,7 +19,7 @@ namespace Sea
         }
         else if (m_SelectedResource != UINT32_MAX)
         {
-            ResourceNode* res = m_Graph.GetResource(m_SelectedResource);
+            ResourceNode* res = m_Graph->GetResource(m_SelectedResource);
             if (res)
             {
                 RenderResourceProperties(*res);

@@ -10,6 +10,8 @@ namespace Sea
     {
         enum Type { Constants, CBV, SRV, UAV, DescriptorTable } type;
         u32 shaderRegister = 0, registerSpace = 0, num32BitValues = 0;
+        u32 numDescriptors = 1;  // 用于 DescriptorTable 类型
+        D3D12_DESCRIPTOR_RANGE_TYPE rangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;  // 用于 DescriptorTable 类型
         D3D12_SHADER_VISIBILITY visibility = D3D12_SHADER_VISIBILITY_ALL;
     };
 

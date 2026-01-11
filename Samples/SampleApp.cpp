@@ -165,6 +165,12 @@ namespace Sea
                 m_Camera->GetNearZ(), m_Camera->GetFarZ());
         }
         
+        // 更新 Deferred 渲染器资源尺寸
+        if (m_DeferredRenderer)
+        {
+            m_DeferredRenderer->Resize(width, height);
+        }
+        
         SEA_CORE_INFO("Scene render target created: {}x{}", width, height);
         return true;
     }
@@ -259,10 +265,10 @@ namespace Sea
         PassTemplateLibrary::Initialize();
 
         // 创建编辑器组件
-        m_NodeEditor = MakeScope<NodeEditor>(*m_RenderGraph, m_Device.get());
+        m_NodeEditor = MakeScope<NodeEditor>(m_RenderGraph.get(), m_Device.get());
         m_NodeEditor->Initialize();
 
-        m_PropertyPanel = MakeScope<PropertyPanel>(*m_RenderGraph);
+        m_PropertyPanel = MakeScope<PropertyPanel>(m_RenderGraph.get());
         m_ShaderEditor = MakeScope<ShaderEditor>();
 
         // 帧同步
@@ -301,6 +307,22 @@ namespace Sea
         {
             SEA_CORE_WARN("Failed to initialize Ocean simulation - Ocean scenes will not be available");
             m_Ocean.reset();
+        }
+        
+        // 创建 Bloom 渲染器
+        m_BloomRenderer = MakeScope<BloomRenderer>(*m_Device);
+        if (!m_BloomRenderer->Initialize(m_ViewportWidth, m_ViewportHeight))
+        {
+            SEA_CORE_WARN("Failed to initialize BloomRenderer - Bloom will not be available");
+            m_BloomRenderer.reset();
+        }
+        
+        // 创建 Deferred 渲染器
+        m_DeferredRenderer = MakeScope<DeferredRenderer>(*m_Device);
+        if (!m_DeferredRenderer->Initialize(m_ViewportWidth, m_ViewportHeight))
+        {
+            SEA_CORE_WARN("Failed to initialize DeferredRenderer - Deferred pipeline will not be available");
+            m_DeferredRenderer.reset();
         }
         
         // 设置场景切换回调
@@ -549,6 +571,24 @@ namespace Sea
                 ImGui::MenuItem("Console", nullptr, &m_ShowConsole);
                 ImGui::MenuItem("Asset Browser", nullptr, &m_ShowAssetBrowser);
                 ImGui::MenuItem("Render Settings", nullptr, &m_ShowRenderSettings);
+                ImGui::Separator();
+                
+                // UI 缩放选项 - 适用于远程桌面
+                if (ImGui::BeginMenu("UI Scale"))
+                {
+                    ImGuiIO& io = ImGui::GetIO();
+                    static float uiScale = 1.0f;
+                    if (ImGui::MenuItem("100%", nullptr, uiScale == 1.0f)) { uiScale = 1.0f; io.FontGlobalScale = uiScale; }
+                    if (ImGui::MenuItem("125%", nullptr, uiScale == 1.25f)) { uiScale = 1.25f; io.FontGlobalScale = uiScale; }
+                    if (ImGui::MenuItem("150%", nullptr, uiScale == 1.5f)) { uiScale = 1.5f; io.FontGlobalScale = uiScale; }
+                    if (ImGui::MenuItem("175%", nullptr, uiScale == 1.75f)) { uiScale = 1.75f; io.FontGlobalScale = uiScale; }
+                    if (ImGui::MenuItem("200%", nullptr, uiScale == 2.0f)) { uiScale = 2.0f; io.FontGlobalScale = uiScale; }
+                    ImGui::Separator();
+                    if (ImGui::MenuItem("75%", nullptr, uiScale == 0.75f)) { uiScale = 0.75f; io.FontGlobalScale = uiScale; }
+                    if (ImGui::MenuItem("50%", nullptr, uiScale == 0.5f)) { uiScale = 0.5f; io.FontGlobalScale = uiScale; }
+                    ImGui::EndMenu();
+                }
+                
                 ImGui::Separator();
                 ImGui::MenuItem("ImGui Demo", nullptr, &m_ShowDemoWindow);
                 ImGui::EndMenu();
@@ -1224,6 +1264,70 @@ namespace Sea
             // 渲染器设置
             if (ImGui::CollapsingHeader("Renderer", ImGuiTreeNodeFlags_DefaultOpen))
             {
+                // 渲染管线切换
+                const char* pipelineNames[] = { "Forward", "Deferred" };
+                int pipelineIndex = static_cast<int>(m_CurrentPipeline);
+                
+                bool deferredAvailable = m_DeferredRenderer != nullptr;
+                
+                if (!deferredAvailable)
+                {
+                    ImGui::BeginDisabled();
+                }
+                
+                if (ImGui::Combo("Render Pipeline", &pipelineIndex, pipelineNames, IM_ARRAYSIZE(pipelineNames)))
+                {
+                    RenderPipeline newPipeline = static_cast<RenderPipeline>(pipelineIndex);
+                    if (newPipeline != m_CurrentPipeline)
+                    {
+                        // 等待GPU完成所有工作以避免资源竞争
+                        m_GraphicsQueue->WaitForIdle();
+                        
+                        m_CurrentPipeline = newPipeline;
+                        // 重建RenderGraph以反映新的渲染管线
+                        SetupRenderGraph();
+                        // 更新编辑器组件的RenderGraph引用
+                        m_NodeEditor->SetRenderGraph(m_RenderGraph.get());
+                        m_PropertyPanel->SetRenderGraph(m_RenderGraph.get());
+                        SEA_CORE_INFO("Switched to {} pipeline", pipelineNames[pipelineIndex]);
+                    }
+                }
+                
+                if (!deferredAvailable)
+                {
+                    ImGui::EndDisabled();
+                    ImGui::SameLine();
+                    ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.5f, 1.0f), "(Deferred not available)");
+                }
+                
+                // Deferred 渲染设置
+                if (m_CurrentPipeline == RenderPipeline::Deferred && m_DeferredRenderer)
+                {
+                    ImGui::Separator();
+                    ImGui::Text("Deferred Settings");
+                    ImGui::Indent();
+                    
+                    auto& deferredSettings = m_DeferredRenderer->GetSettings();
+                    ImGui::Checkbox("Debug G-Buffer", &deferredSettings.DebugGBuffer);
+                    
+                    if (deferredSettings.DebugGBuffer)
+                    {
+                        const char* gbufferNames[] = { "Albedo", "Normal", "Position", "Emissive" };
+                        int debugIndex = static_cast<int>(deferredSettings.DebugGBufferIndex);
+                        if (ImGui::Combo("G-Buffer View", &debugIndex, gbufferNames, IM_ARRAYSIZE(gbufferNames)))
+                        {
+                            deferredSettings.DebugGBufferIndex = static_cast<u32>(debugIndex);
+                        }
+                    }
+                    
+                    ImGui::SliderFloat("Ambient Intensity", &deferredSettings.AmbientIntensity, 0.0f, 1.0f);
+                    ImGui::Checkbox("SSAO (未实现)", &deferredSettings.UseSSAO);
+                    
+                    ImGui::Unindent();
+                }
+                
+                ImGui::Separator();
+                
                 if (m_Renderer)
                 {
                     bool usePBR = m_Renderer->GetUsePBR();
@@ -1261,17 +1365,32 @@ namespace Sea
                         lightDir.y = sinf(pitchRad);
                         lightDir.z = cosf(pitchRad) * cosf(yawRad);
                         m_Renderer->SetLightDirection(lightDir);
+                        // 同步到 Deferred 渲染器
+                        if (m_DeferredRenderer)
+                            m_DeferredRenderer->SetLightDirection(lightDir);
                     }
                     
                     if (ImGui::ColorEdit3("Light Color", &lightColor.x))
+                    {
                         m_Renderer->SetLightColor(lightColor);
+                        if (m_DeferredRenderer)
+                            m_DeferredRenderer->SetLightColor(lightColor);
+                    }
                     if (ImGui::DragFloat("Light Intensity", &lightIntensity, 0.1f, 0.0f, 20.0f))
+                    {
                         m_Renderer->SetLightIntensity(lightIntensity);
+                        if (m_DeferredRenderer)
+                            m_DeferredRenderer->SetLightIntensity(lightIntensity);
+                    }
                     
                     ImGui::Separator();
                     ImGui::Text("Ambient");
                     if (ImGui::ColorEdit3("Ambient Color", &ambientColor.x))
+                    {
                         m_Renderer->SetAmbientColor(ambientColor);
+                        if (m_DeferredRenderer)
+                            m_DeferredRenderer->SetAmbientColor(ambientColor);
+                    }
                 }
             }
             
@@ -1297,23 +1416,56 @@ namespace Sea
             // 后处理设置 - Unreal风格Bloom
             if (ImGui::CollapsingHeader("Post Processing"))
             {
-                ImGui::TextColored(ImVec4(0.8f, 0.6f, 0.2f, 1.0f), "Note: Post processing requires RenderGraph implementation");
+                // Bloom设置 (Unreal风格) - 现在已集成
+                if (m_BloomRenderer)
+                {
+                    auto& bloomSettings = m_BloomRenderer->GetSettings();
+                    
+                    ImGui::Checkbox("Bloom (Unreal Style)", &bloomSettings.Enabled);
+                    if (bloomSettings.Enabled)
+                    {
+                        ImGui::Indent();
+                        ImGui::SliderFloat("Intensity", &bloomSettings.Intensity, 0.0f, 5.0f, "%.3f");
+                        ImGui::SliderFloat("Threshold", &bloomSettings.Threshold, 0.0f, 5.0f, "%.2f");
+                        ImGui::SliderFloat("Radius", &bloomSettings.Radius, 0.5f, 4.0f, "%.2f");
+                        
+                        float tint[3] = { bloomSettings.TintR, bloomSettings.TintG, bloomSettings.TintB };
+                        if (ImGui::ColorEdit3("Tint", tint))
+                        {
+                            bloomSettings.TintR = tint[0];
+                            bloomSettings.TintG = tint[1];
+                            bloomSettings.TintB = tint[2];
+                        }
+                        
+                        if (ImGui::TreeNode("Per-Mip Weights"))
+                        {
+                            ImGui::SliderFloat("1/2 Res", &bloomSettings.Mip1Weight, 0.0f, 1.0f);
+                            ImGui::SliderFloat("1/4 Res", &bloomSettings.Mip2Weight, 0.0f, 1.0f);
+                            ImGui::SliderFloat("1/8 Res", &bloomSettings.Mip3Weight, 0.0f, 1.0f);
+                            ImGui::SliderFloat("1/16 Res", &bloomSettings.Mip4Weight, 0.0f, 1.0f);
+                            ImGui::SliderFloat("1/32 Res", &bloomSettings.Mip5Weight, 0.0f, 1.0f);
+                            ImGui::SliderFloat("1/64 Res", &bloomSettings.Mip6Weight, 0.0f, 1.0f);
+                            
+                            if (ImGui::Button("Reset to Default"))
+                            {
+                                bloomSettings.Mip1Weight = 0.266f;
+                                bloomSettings.Mip2Weight = 0.232f;
+                                bloomSettings.Mip3Weight = 0.246f;
+                                bloomSettings.Mip4Weight = 0.384f;
+                                bloomSettings.Mip5Weight = 0.426f;
+                                bloomSettings.Mip6Weight = 0.060f;
+                            }
+                            ImGui::TreePop();
+                        }
+                        ImGui::Unindent();
+                    }
+                }
+                else
+                {
+                    ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.5f, 1.0f), "BloomRenderer not available");
+                }
+                
                 ImGui::Separator();
-                
-                // Bloom设置 (Unreal风格)
-                static bool bloomEnabled = false;
-                static float bloomIntensity = 0.675f;
-                static float bloomThreshold = 1.0f;
-                static float bloomRadius = 1.0f;
-                static float bloomTint[3] = { 1.0f, 1.0f, 1.0f };
-                
-                // 每层Bloom权重 (Unreal有6层)
-                static float bloom1Weight = 0.266f;  // 1/2 res
-                static float bloom2Weight = 0.232f;  // 1/4 res
-                static float bloom3Weight = 0.246f;  // 1/8 res
-                static float bloom4Weight = 0.384f;  // 1/16 res
-                static float bloom5Weight = 0.426f;  // 1/32 res
-                static float bloom6Weight = 0.060f;  // 1/64 res
                 
                 // Tonemapping设置
                 static bool tonemapEnabled = true;
@@ -1325,41 +1477,6 @@ namespace Sea
                 static float exposure = 1.0f;
                 static float contrast = 1.0f;
                 static float saturation = 1.0f;
-                
-                // Bloom UI
-                ImGui::Checkbox("Bloom (Unreal Style)", &bloomEnabled);
-                if (bloomEnabled)
-                {
-                    ImGui::Indent();
-                    ImGui::SliderFloat("Intensity", &bloomIntensity, 0.0f, 5.0f, "%.3f");
-                    ImGui::SliderFloat("Threshold", &bloomThreshold, 0.0f, 5.0f, "%.2f");
-                    ImGui::SliderFloat("Radius", &bloomRadius, 0.5f, 4.0f, "%.2f");
-                    ImGui::ColorEdit3("Tint", bloomTint);
-                    
-                    if (ImGui::TreeNode("Per-Mip Weights"))
-                    {
-                        ImGui::SliderFloat("1/2 Res", &bloom1Weight, 0.0f, 1.0f);
-                        ImGui::SliderFloat("1/4 Res", &bloom2Weight, 0.0f, 1.0f);
-                        ImGui::SliderFloat("1/8 Res", &bloom3Weight, 0.0f, 1.0f);
-                        ImGui::SliderFloat("1/16 Res", &bloom4Weight, 0.0f, 1.0f);
-                        ImGui::SliderFloat("1/32 Res", &bloom5Weight, 0.0f, 1.0f);
-                        ImGui::SliderFloat("1/64 Res", &bloom6Weight, 0.0f, 1.0f);
-                        
-                        if (ImGui::Button("Reset to Default"))
-                        {
-                            bloom1Weight = 0.266f;
-                            bloom2Weight = 0.232f;
-                            bloom3Weight = 0.246f;
-                            bloom4Weight = 0.384f;
-                            bloom5Weight = 0.426f;
-                            bloom6Weight = 0.060f;
-                        }
-                        ImGui::TreePop();
-                    }
-                    ImGui::Unindent();
-                }
-                
-                ImGui::Separator();
                 
                 // Tonemapping UI
                 ImGui::Checkbox("Tone Mapping", &tonemapEnabled);
@@ -1571,39 +1688,82 @@ namespace Sea
             cmdList->SetViewport(sceneViewport);
             cmdList->SetScissorRect(sceneScissor);
 
-            // 开始3D渲染
-            m_Renderer->BeginFrame(*m_Camera, m_TotalTime);
-
-            // 首先渲染天空（如果启用）
-            if (m_SkyRenderer && m_SkyRenderer->GetSettings().EnableSky)
+            // 根据渲染管线类型选择渲染路径
+            if (m_CurrentPipeline == RenderPipeline::Deferred && m_DeferredRenderer && !m_OceanSceneActive)
             {
-                m_SkyRenderer->Render(*cmdList, *m_Camera);
-            }
-
-            // 根据场景类型渲染
-            if (m_OceanSceneActive && m_Ocean)
-            {
-                // 渲染海洋场景
-                m_Ocean->Update(0.016f, *cmdList);  // 假设60fps
-                m_Ocean->Render(*cmdList, *m_Camera);
+                // ========== Deferred 渲染路径 ==========
+                // 1. G-Buffer Pass
+                m_DeferredRenderer->BeginGBufferPass(*cmdList, *m_Camera, m_TotalTime);
+                
+                // 渲染所有场景对象到 G-Buffer
+                for (const auto& obj : m_SceneObjects)
+                {
+                    m_DeferredRenderer->RenderObjectToGBuffer(*cmdList, obj);
+                }
+                
+                m_DeferredRenderer->EndGBufferPass(*cmdList);
+                
+                // 2. Lighting Pass - 输出到场景渲染目标
+                D3D12_CPU_DESCRIPTOR_HANDLE deferredSceneRtv = m_SceneRTVHeap->GetCPUHandle(0);
+                m_DeferredRenderer->LightingPass(*cmdList, deferredSceneRtv, 
+                    m_SceneRenderTarget->GetResource(), m_ViewportWidth, m_ViewportHeight);
+                
+                // 获取深度句柄用于后续渲染
+                D3D12_CPU_DESCRIPTOR_HANDLE deferredDsv = m_DSVHeap->GetCPUHandle(0);
+                
+                // 3. 渲染天空（在 deferred 之后叠加，使用深度测试）
+                if (m_SkyRenderer && m_SkyRenderer->GetSettings().EnableSky)
+                {
+                    // 重新设置渲染目标和深度
+                    cmdList->GetCommandList()->OMSetRenderTargets(1, &deferredSceneRtv, FALSE, &deferredDsv);
+                    m_SkyRenderer->Render(*cmdList, *m_Camera);
+                }
+                
+                // 4. 渲染网格（前向渲染叠加）
+                if (m_GridMesh)
+                {
+                    cmdList->GetCommandList()->OMSetRenderTargets(1, &deferredSceneRtv, FALSE, &deferredDsv);
+                    m_Renderer->BeginFrame(*m_Camera, m_TotalTime);
+                    m_Renderer->RenderGrid(*cmdList, *m_GridMesh);
+                }
             }
             else
             {
-                // 渲染普通场景
-                // 渲染网格
-                if (m_GridMesh)
+                // ========== Forward 渲染路径 ==========
+                // 开始3D渲染
+                m_Renderer->BeginFrame(*m_Camera, m_TotalTime);
+
+                // 首先渲染天空（如果启用）
+                if (m_SkyRenderer && m_SkyRenderer->GetSettings().EnableSky)
                 {
-                    m_Renderer->RenderGrid(*cmdList, *m_GridMesh);
+                    m_SkyRenderer->Render(*cmdList, *m_Camera);
                 }
 
-                // 渲染场景对象
-                for (const auto& obj : m_SceneObjects)
+                // 根据场景类型渲染
+                if (m_OceanSceneActive && m_Ocean)
                 {
-                    m_Renderer->RenderObject(*cmdList, obj);
+                    // 渲染海洋场景
+                    m_Ocean->Update(0.016f, *cmdList);  // 假设60fps
+                    m_Ocean->Render(*cmdList, *m_Camera);
+                }
+                else
+                {
+                    // 渲染普通场景
+                    // 渲染网格
+                    if (m_GridMesh)
+                    {
+                        m_Renderer->RenderGrid(*cmdList, *m_GridMesh);
+                    }
+
+                    // 渲染场景对象
+                    for (const auto& obj : m_SceneObjects)
+                    {
+                        m_Renderer->RenderObject(*cmdList, obj);
+                    }
                 }
             }
 
-            // 转换场景渲染目标到 ShaderResource 状态（供 ImGui 使用）
+            // 转换场景渲染目标到 ShaderResource 状态（供 Bloom 和 ImGui 使用）
             cmdList->TransitionBarrier(
                 m_SceneRenderTarget->GetResource(),
                 ResourceState::RenderTarget,
@@ -1615,6 +1775,15 @@ namespace Sea
                 ResourceState::Common
             );
             cmdList->FlushBarriers();
+            
+            // ========== Bloom Pass (如果启用) ==========
+            if (m_BloomRenderer && m_BloomRenderer->GetSettings().Enabled)
+            {
+                // 注意：Bloom 需要场景的 SRV 句柄。当前使用 ImGui 注册的 SRV。
+                // 实际应用中应该有独立的 SRV 堆管理。
+                m_BloomRenderer->Resize(m_ViewportWidth, m_ViewportHeight);
+                // TODO: 集成 Bloom - 需要额外的 SRV 设置
+            }
         }
 
         // ========== 2. 渲染 ImGui 到 SwapChain ==========
@@ -1682,10 +1851,13 @@ namespace Sea
 
     void SampleApp::SetupRenderGraph()
     {
+        // 清理现有RenderGraph
+        m_RenderGraph = MakeScope<RenderGraph>();
+        
         // 初始化RenderGraph
         m_RenderGraph->Initialize(m_Device.get());
 
-        // 创建资源节点 - 反映实际渲染流程
+        // 创建公共资源节点
         u32 depthId = m_RenderGraph->CreateResource("Depth Buffer", ResourceNodeType::Texture2D);
         if (auto* depth = m_RenderGraph->GetResource(depthId))
         {
@@ -1710,30 +1882,118 @@ namespace Sea
             backBuffer->SetPosition(650, 100);
         }
 
-        // Forward PBR Pass - 渲染场景对象 (Grid + PBR Objects 或 Ocean)
-        u32 forwardId = m_RenderGraph->AddPass("Forward PBR", PassType::Graphics);
-        if (auto* forward = m_RenderGraph->GetPass(forwardId))
+        if (m_CurrentPipeline == RenderPipeline::Forward)
         {
-            forward->AddOutput("Scene Color");
-            forward->AddOutput("Depth");
-            forward->SetOutput(0, sceneColorId);
-            forward->SetOutput(1, depthId);
-            forward->SetPosition(200, 100);
-        }
+            // ========== Forward 渲染管线 ==========
+            // Forward PBR Pass - 渲染场景对象 (Grid + PBR Objects 或 Ocean)
+            u32 forwardId = m_RenderGraph->AddPass("Forward PBR", PassType::Graphics);
+            if (auto* forward = m_RenderGraph->GetPass(forwardId))
+            {
+                forward->AddOutput("Scene Color");
+                forward->AddOutput("Depth");
+                forward->SetOutput(0, sceneColorId);
+                forward->SetOutput(1, depthId);
+                forward->SetPosition(200, 100);
+            }
 
-        // ImGui Pass - 渲染 UI 到后缓冲
-        u32 imguiId = m_RenderGraph->AddPass("ImGui", PassType::Graphics);
-        if (auto* imgui = m_RenderGraph->GetPass(imguiId))
+            // ImGui Pass - 渲染 UI 到后缓冲
+            u32 imguiId = m_RenderGraph->AddPass("ImGui", PassType::Graphics);
+            if (auto* imgui = m_RenderGraph->GetPass(imguiId))
+            {
+                imgui->AddInput("Scene Color");
+                imgui->AddOutput("Back Buffer");
+                imgui->SetInput(0, sceneColorId);
+                imgui->SetOutput(0, backBufferId);
+                imgui->SetPosition(500, 100);
+            }
+
+            SEA_CORE_INFO("Render graph created with Forward pipeline");
+        }
+        else if (m_CurrentPipeline == RenderPipeline::Deferred)
         {
-            imgui->AddInput("Scene Color");
-            imgui->AddOutput("Back Buffer");
-            imgui->SetInput(0, sceneColorId);
-            imgui->SetOutput(0, backBufferId);
-            imgui->SetPosition(500, 100);
+            // ========== Deferred 渲染管线 ==========
+            // G-Buffer资源
+            u32 albedoMetallicId = m_RenderGraph->CreateResource("GBuffer Albedo+Metallic", ResourceNodeType::Texture2D);
+            if (auto* rt = m_RenderGraph->GetResource(albedoMetallicId))
+            {
+                rt->SetDimensions(1920, 1080);
+                rt->SetFormat(Format::R8G8B8A8_UNORM);
+                rt->SetPosition(50, 250);
+            }
+
+            u32 normalRoughnessId = m_RenderGraph->CreateResource("GBuffer Normal+Roughness", ResourceNodeType::Texture2D);
+            if (auto* rt = m_RenderGraph->GetResource(normalRoughnessId))
+            {
+                rt->SetDimensions(1920, 1080);
+                rt->SetFormat(Format::R16G16B16A16_FLOAT);
+                rt->SetPosition(50, 350);
+            }
+
+            u32 positionAoId = m_RenderGraph->CreateResource("GBuffer Position+AO", ResourceNodeType::Texture2D);
+            if (auto* rt = m_RenderGraph->GetResource(positionAoId))
+            {
+                rt->SetDimensions(1920, 1080);
+                rt->SetFormat(Format::R32G32B32A32_FLOAT);
+                rt->SetPosition(50, 450);
+            }
+
+            u32 emissiveId = m_RenderGraph->CreateResource("GBuffer Emissive", ResourceNodeType::Texture2D);
+            if (auto* rt = m_RenderGraph->GetResource(emissiveId))
+            {
+                rt->SetDimensions(1920, 1080);
+                rt->SetFormat(Format::R16G16B16A16_FLOAT);
+                rt->SetPosition(50, 550);
+            }
+
+            // G-Buffer Pass
+            u32 gbufferId = m_RenderGraph->AddPass("G-Buffer", PassType::Graphics);
+            if (auto* gbuffer = m_RenderGraph->GetPass(gbufferId))
+            {
+                gbuffer->AddOutput("Albedo+Metallic");
+                gbuffer->AddOutput("Normal+Roughness");
+                gbuffer->AddOutput("Position+AO");
+                gbuffer->AddOutput("Emissive");
+                gbuffer->AddOutput("Depth");
+                gbuffer->SetOutput(0, albedoMetallicId);
+                gbuffer->SetOutput(1, normalRoughnessId);
+                gbuffer->SetOutput(2, positionAoId);
+                gbuffer->SetOutput(3, emissiveId);
+                gbuffer->SetOutput(4, depthId);
+                gbuffer->SetPosition(200, 100);
+            }
+
+            // Deferred Lighting Pass
+            u32 lightingId = m_RenderGraph->AddPass("Deferred Lighting", PassType::Graphics);
+            if (auto* lighting = m_RenderGraph->GetPass(lightingId))
+            {
+                lighting->AddInput("Albedo+Metallic");
+                lighting->AddInput("Normal+Roughness");
+                lighting->AddInput("Position+AO");
+                lighting->AddInput("Emissive");
+                lighting->AddOutput("Scene Color");
+                lighting->SetInput(0, albedoMetallicId);
+                lighting->SetInput(1, normalRoughnessId);
+                lighting->SetInput(2, positionAoId);
+                lighting->SetInput(3, emissiveId);
+                lighting->SetOutput(0, sceneColorId);
+                lighting->SetPosition(400, 100);
+            }
+
+            // ImGui Pass
+            u32 imguiId = m_RenderGraph->AddPass("ImGui", PassType::Graphics);
+            if (auto* imgui = m_RenderGraph->GetPass(imguiId))
+            {
+                imgui->AddInput("Scene Color");
+                imgui->AddOutput("Back Buffer");
+                imgui->SetInput(0, sceneColorId);
+                imgui->SetOutput(0, backBufferId);
+                imgui->SetPosition(600, 100);
+            }
+
+            SEA_CORE_INFO("Render graph created with Deferred pipeline");
         }
 
         m_RenderGraph->Compile();
-        SEA_CORE_INFO("Render graph created with {} passes (Forward PBR + ImGui)", m_RenderGraph->GetPasses().size());
     }
 
     void SampleApp::CreateResources()

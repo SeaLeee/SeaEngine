@@ -4,6 +4,7 @@
 #include <d3dcompiler.h>
 #include <dxcapi.h>
 #include <wrl/client.h>
+#include <filesystem>
 
 using Microsoft::WRL::ComPtr;
 
@@ -104,6 +105,13 @@ namespace Sea
         std::vector<LPCWSTR> args;
         args.push_back(L"-E"); args.push_back(wEntry.c_str());
         args.push_back(L"-T"); args.push_back(target.c_str());
+        
+        // 添加 include 路径 - 使用 shader 文件所在目录
+        std::wstring shaderDir = desc.filePath.parent_path().wstring();
+        std::wstring shadersRoot = std::filesystem::path("Shaders").wstring();
+        args.push_back(L"-I"); args.push_back(shaderDir.c_str());
+        args.push_back(L"-I"); args.push_back(shadersRoot.c_str());
+        
         if (desc.debug) { args.push_back(L"-Zi"); args.push_back(L"-Od"); }
         if (desc.optimize) args.push_back(L"-O3");
 
