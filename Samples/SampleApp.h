@@ -78,6 +78,18 @@ namespace Sea
         bool LoadExternalModel(const std::string& filepath);
         void ScanAvailableModels();
         
+        // 资源浏览器
+        std::string m_CurrentAssetPath = "Assets";
+        std::vector<std::string> m_AssetPathHistory;
+        
+        // 对象选择与材质编辑
+        int m_SelectedObjectIndex = -1;
+        bool m_ShowDetailPanel = true;
+        void RenderDetailPanel();
+        
+        // 视图模式 (0=Lit, 1=Wireframe, 2=Normals)
+        int m_ViewMode = 0;
+        
         // 深度缓冲
         Scope<Texture> m_DepthBuffer;
         Scope<DescriptorHeap> m_DSVHeap;
@@ -130,5 +142,6 @@ namespace Sea
         void RenderRenderSettings();
         bool CreateSceneRenderTarget(u32 width, u32 height);
         void RenderSceneToTexture();
+        void RecompileAllShaders();  // 重新编译所有着色器
     };
 }

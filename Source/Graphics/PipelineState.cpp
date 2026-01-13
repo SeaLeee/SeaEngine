@@ -38,9 +38,17 @@ namespace Sea
         psoDesc.DSVFormat = static_cast<DXGI_FORMAT>(desc.dsvFormat);
 
         auto pso = Ref<PipelineState>(new PipelineState());
-        if (FAILED(device.GetDevice()->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&pso->m_PipelineState))))
+        HRESULT hr = device.GetDevice()->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&pso->m_PipelineState));
+        if (FAILED(hr))
         {
-            SEA_CORE_ERROR("Failed to create graphics pipeline state");
+            SEA_CORE_ERROR("Failed to create graphics pipeline state, HRESULT: 0x{:X}", static_cast<unsigned int>(hr));
+            
+            // 尝试获取设备移除原因
+            if (hr == DXGI_ERROR_DEVICE_REMOVED)
+            {
+                HRESULT reason = device.GetDevice()->GetDeviceRemovedReason();
+                SEA_CORE_ERROR("Device removed reason: 0x{:X}", static_cast<unsigned int>(reason));
+            }
             return nullptr;
         }
         return pso;

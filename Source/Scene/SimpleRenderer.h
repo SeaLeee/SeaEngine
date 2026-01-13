@@ -63,6 +63,9 @@ namespace Sea
 
         bool Initialize();
         void Shutdown();
+        
+        // 重新编译着色器
+        bool RecompileShaders();
 
         void BeginFrame(Camera& camera, f32 time);
         void RenderObject(CommandList& cmdList, const SceneObject& obj);
@@ -71,6 +74,10 @@ namespace Sea
         // PBR 设置
         void SetUsePBR(bool usePBR) { m_UsePBR = usePBR; }
         bool GetUsePBR() const { return m_UsePBR; }
+
+        // 视图模式 (0=Lit, 1=Wireframe, 2=Normals)
+        void SetViewMode(int mode) { m_ViewMode = mode; }
+        int GetViewMode() const { return m_ViewMode; }
 
         void SetLightDirection(const XMFLOAT3& dir) { m_LightDirection = dir; }
         void SetLightColor(const XMFLOAT3& color) { m_LightColor = color; }
@@ -87,7 +94,9 @@ namespace Sea
 
         Scope<RootSignature> m_RootSignature;
         Ref<PipelineState> m_BasicPSO;
-        Ref<PipelineState> m_PBRPSO;      // PBR 管线
+        Ref<PipelineState> m_PBRPSO;           // PBR 管线
+        Ref<PipelineState> m_WireframePSO;     // Wireframe 管线
+        Ref<PipelineState> m_NormalsPSO;       // Normals 可视化管线
         Ref<PipelineState> m_GridPSO;
 
         Scope<Buffer> m_FrameConstantBuffer;
@@ -106,5 +115,6 @@ namespace Sea
         XMFLOAT3 m_AmbientColor = { 0.15f, 0.18f, 0.22f };  // 稍微增加环境光
         
         bool m_UsePBR = true;             // 默认使用 PBR
+        int m_ViewMode = 0;               // 0=Lit, 1=Wireframe, 2=Normals
     };
 }

@@ -95,6 +95,13 @@ namespace Sea
         void SetLightColor(const XMFLOAT3& color) { m_LightColor = color; }
         void SetLightIntensity(float intensity) { m_LightIntensity = intensity; }
         void SetAmbientColor(const XMFLOAT3& color) { m_AmbientColor = color; }
+        
+        // 视图模式 (0=Lit, 1=Wireframe, 2=Normals)
+        void SetViewMode(int mode) { m_ViewMode = mode; }
+        int GetViewMode() const { return m_ViewMode; }
+        
+        // 重新编译着色器
+        bool RecompileShaders();
 
         // 获取 G-Buffer 用于调试
         ID3D12Resource* GetGBufferResource(u32 index) const;
@@ -135,6 +142,7 @@ namespace Sea
         Scope<RootSignature> m_GBufferRootSignature;
         Scope<RootSignature> m_LightingRootSignature;
         Ref<PipelineState> m_GBufferPSO;
+        Ref<PipelineState> m_GBufferWireframePSO;  // Wireframe 模式
         Ref<PipelineState> m_LightingPSO;
 
         // 常量缓冲区
@@ -152,6 +160,9 @@ namespace Sea
         XMFLOAT3 m_LightColor = { 1.0f, 0.98f, 0.95f };
         float m_LightIntensity = 2.0f;
         XMFLOAT3 m_AmbientColor = { 0.15f, 0.18f, 0.22f };
+        
+        // 视图模式
+        int m_ViewMode = 0;  // 0=Lit, 1=Wireframe, 2=Normals
 
         // 当前帧数据
         GBufferConstants m_FrameConstants;

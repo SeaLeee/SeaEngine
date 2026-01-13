@@ -66,6 +66,20 @@ namespace Sea
             m_SrvHeap->GetCPUDescriptorHandleForHeapStart(),
             m_SrvHeap->GetGPUDescriptorHandleForHeapStart());
 
+        // 执行一次空帧来初始化 ImGui 状态 - 这对于 Viewports 支持很重要
+        // 防止第一帧时的断言失败
+        ImGui_ImplDX12_NewFrame();
+        ImGui_ImplWin32_NewFrame();
+        ImGui::NewFrame();
+        ImGui::Render();  // 使用 Render 而不是 EndFrame
+        
+        // 如果启用了 Viewports，需要调用 UpdatePlatformWindows
+        ImGuiIO& ioCheck = ImGui::GetIO();
+        if (ioCheck.ConfigFlags & ImGuiConfigFlags_ViewportsEnable)
+        {
+            ImGui::UpdatePlatformWindows();
+        }
+
         SEA_CORE_INFO("ImGui initialized");
         return true;
     }
@@ -80,14 +94,29 @@ namespace Sea
 
     void ImGuiRenderer::BeginFrame()
     {
+        // 确保上一帧已结束
+        if (m_FrameActive)
+        {
+            SEA_CORE_WARN("BeginFrame called without EndFrame - forcing EndFrame");
+            EndFrame();
+        }
+        
         ImGui_ImplDX12_NewFrame();
         ImGui_ImplWin32_NewFrame();
         ImGui::NewFrame();
+        m_FrameActive = true;
     }
 
     void ImGuiRenderer::EndFrame()
     {
+        if (!m_FrameActive)
+        {
+            SEA_CORE_WARN("EndFrame called without BeginFrame");
+            return;
+        }
+        
         ImGui::Render();
+        m_FrameActive = false;
     }
 
     void ImGuiRenderer::Render(ID3D12GraphicsCommandList* cmdList)

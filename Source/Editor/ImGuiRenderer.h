@@ -21,10 +21,10 @@ namespace Sea
         void EndFrame();
         void Render(ID3D12GraphicsCommandList* cmdList);
 
-        // ×¢²áÒ»¸öÎÆÀíÓÃÓÚ ImGui::Image()£¬·µ»Ø GPU handle
+        // ×¢ï¿½ï¿½Ò»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ImGui::Image()ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ GPU handle
         D3D12_GPU_DESCRIPTOR_HANDLE RegisterTexture(ID3D12Resource* texture, DXGI_FORMAT format);
         
-        // »ñÈ¡ SRV ¶Ñ
+        // ï¿½ï¿½È¡ SRV ï¿½ï¿½
         ID3D12DescriptorHeap* GetSrvHeap() const { return m_SrvHeap.Get(); }
 
     private:
@@ -33,6 +33,7 @@ namespace Sea
         ComPtr<ID3D12DescriptorHeap> m_SrvHeap;
         u32 m_SrvDescriptorSize = 0;
         u32 m_NextDescriptorIndex = 1; // 0 is reserved for font texture
+        bool m_FrameActive = false;    // è¿½è¸ªå¸§æ˜¯å¦æ­£åœ¨è¿›è¡Œ
         static constexpr u32 MAX_DESCRIPTORS = 100;
     };
 }

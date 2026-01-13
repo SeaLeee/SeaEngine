@@ -23,7 +23,9 @@ cbuffer BloomConstants : register(b0)
     float g_Bloom4Weight;       // Mip 3 (1/16 res)
     float g_Bloom5Weight;       // Mip 4 (1/32 res)
     float g_Bloom6Weight;       // Mip 5 (1/64 res)
-    float2 g_Padding;
+    
+    float g_CurrentMipLevel;    // Current mip level for upsample
+    float g_IsLastMip;          // 1.0 if this is the smallest mip level
 };
 
 SamplerState g_LinearClampSampler : register(s0);

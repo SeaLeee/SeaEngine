@@ -9,16 +9,19 @@ using namespace DirectX;
 
 namespace Sea
 {
-    // 常量缓冲区结构
+    // 常量缓冲区结构 - AAA 级渲染参数
     struct OceanCBData
     {
         XMFLOAT4X4 viewProj;
         XMFLOAT4X4 world;
         XMFLOAT4 cameraPos;
-        XMFLOAT4 oceanParams;   // patch, grid, time, unused
-        XMFLOAT4 sunDirection;
-        XMFLOAT4 oceanColor;
-        XMFLOAT4 skyColor;
+        XMFLOAT4 oceanParams;       // x = patch size, y = grid size, z = time, w = choppiness
+        XMFLOAT4 sunDirection;      // xyz = direction, w = intensity
+        XMFLOAT4 oceanColor;        // Deep water color
+        XMFLOAT4 skyColor;          // Sky/horizon color
+        XMFLOAT4 scatterColor;      // SSS scatter color
+        XMFLOAT4 foamParams;        // x = foam intensity, y = foam scale, z = whitecap threshold, w = unused
+        XMFLOAT4 atmosphereParams;  // x = fog density, y = fog height falloff, z = sun disk size, w = unused
     };
 
     struct OceanComputeCBData
@@ -54,6 +57,27 @@ namespace Sea
         {
             SEA_CORE_ERROR("Failed to create ocean render pipeline");
             return false;
+        }
+        
+        // 初始化四叉树 LOD
+        m_QuadTree = MakeScope<OceanQuadTree>(m_Device);
+        OceanQuadTreeConfig quadTreeConfig;
+        quadTreeConfig.worldSize = m_Params.gridSize * 20.0f;  // 覆盖更大范围
+        quadTreeConfig.maxLOD = 5;
+        quadTreeConfig.baseMeshResolution = 32;
+        quadTreeConfig.lodBaseDistance = 80.0f;
+        quadTreeConfig.lodDistanceMultiplier = 2.2f;
+        
+        if (!m_QuadTree->Initialize(quadTreeConfig))
+        {
+            SEA_CORE_WARN("Failed to initialize QuadTree LOD, falling back to simple mesh");
+            m_UseQuadTree = false;
+        }
+        else
+        {
+            // 暂时禁用 QuadTree - 存在 PSO 创建问题
+            SEA_CORE_WARN("QuadTree LOD temporarily disabled");
+            m_UseQuadTree = false;
         }
 
         m_Initialized = true;
@@ -104,9 +128,9 @@ namespace Sea
 
     bool Ocean::CreateOceanMesh()
     {
-        // 创建海面网格
-        const u32 gridRes = 128;  // 网格分辨率
-        const f32 size = m_Params.gridSize;
+        // 创建海面网格 - 大范围高精度
+        const u32 gridRes = 256;  // 网格分辨率 (256x256 = 131K 三角形)
+        const f32 size = m_Params.gridSize * 10.0f;  // 扩大10倍覆盖范围
         const f32 halfSize = size * 0.5f;
         const f32 cellSize = size / static_cast<f32>(gridRes);
 
@@ -185,9 +209,9 @@ namespace Sea
             return false;
         }
 
-        // 编译着色器
-        std::string vsPath = "Shaders/Ocean/OceanGerstner_VS.hlsl";
-        std::string psPath = "Shaders/Ocean/OceanGerstner_PS.hlsl";
+        // 编译着色器 - 使用简化版 PS (无纹理依赖)
+        std::string vsPath = "Shaders/Ocean/OceanAdvanced_VS.hlsl";
+        std::string psPath = "Shaders/Ocean/OceanSimple_PS.hlsl";
         
         ShaderCompileDesc vsDesc;
         vsDesc.filePath = vsPath;
@@ -238,7 +262,168 @@ namespace Sea
             return false;
         }
 
+        // ========== Wireframe PSO ==========
+        GraphicsPipelineDesc wireframeDesc = psoDesc;
+        wireframeDesc.fillMode = FillMode::Wireframe;
+        m_WireframePSO = PipelineState::CreateGraphics(m_Device, wireframeDesc);
+        if (!m_WireframePSO)
+        {
+            SEA_CORE_WARN("Failed to create Ocean Wireframe PSO");
+        }
+
+        // ========== Normals PSO ==========
+        // 使用 Ocean 专用的法线调试 shader (与 Ocean root signature 匹配)
+        std::string normalsShaderPath = "Shaders/Ocean/OceanNormals.hlsl";
+        
+        ShaderCompileDesc normalsVsDesc;
+        normalsVsDesc.filePath = normalsShaderPath;
+        normalsVsDesc.entryPoint = "VSMain";
+        normalsVsDesc.stage = ShaderStage::Vertex;
+        normalsVsDesc.model = ShaderModel::SM_6_0;
+        auto normalsVsResult = ShaderCompiler::Compile(normalsVsDesc);
+
+        ShaderCompileDesc normalsPsDesc;
+        normalsPsDesc.filePath = normalsShaderPath;
+        normalsPsDesc.entryPoint = "PSMain";
+        normalsPsDesc.stage = ShaderStage::Pixel;
+        normalsPsDesc.model = ShaderModel::SM_6_0;
+        auto normalsPsResult = ShaderCompiler::Compile(normalsPsDesc);
+
+        if (normalsVsResult.success && normalsPsResult.success)
+        {
+            GraphicsPipelineDesc normalsDesc = psoDesc;
+            normalsDesc.vertexShader = normalsVsResult.bytecode;
+            normalsDesc.pixelShader = normalsPsResult.bytecode;
+            m_NormalsPSO = PipelineState::CreateGraphics(m_Device, normalsDesc);
+            if (!m_NormalsPSO)
+            {
+                SEA_CORE_WARN("Failed to create Ocean Normals PSO");
+            }
+        }
+
         SEA_CORE_INFO("Ocean render pipeline created successfully");
+        return true;
+    }
+
+    bool Ocean::CreateQuadTreePipeline()
+    {
+        // 创建根签名 - 需要额外的 SRV 用于实例数据
+        RootSignatureDesc rsDesc;
+        rsDesc.flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
+
+        // Root parameter 0: OceanCB at b0
+        RootParameterDesc cbvParam;
+        cbvParam.type = RootParameterDesc::CBV;
+        cbvParam.shaderRegister = 0;
+        cbvParam.registerSpace = 0;
+        cbvParam.visibility = D3D12_SHADER_VISIBILITY_ALL;
+        rsDesc.parameters.push_back(cbvParam);
+
+        // Root parameter 1: Instance buffer SRV at t0
+        RootParameterDesc srvParam;
+        srvParam.type = RootParameterDesc::DescriptorTable;
+        srvParam.shaderRegister = 0;
+        srvParam.registerSpace = 0;
+        srvParam.numDescriptors = 1;
+        srvParam.rangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+        srvParam.visibility = D3D12_SHADER_VISIBILITY_VERTEX;
+        rsDesc.parameters.push_back(srvParam);
+
+        m_QuadTreeRootSig = MakeScope<RootSignature>(m_Device, rsDesc);
+        if (!m_QuadTreeRootSig->Initialize())
+        {
+            SEA_CORE_ERROR("Failed to create QuadTree root signature");
+            return false;
+        }
+
+        // 创建 SRV 堆用于实例缓冲区
+        DescriptorHeapDesc srvHeapDesc;
+        srvHeapDesc.type = DescriptorHeapType::CBV_SRV_UAV;
+        srvHeapDesc.numDescriptors = 1;
+        srvHeapDesc.shaderVisible = true;
+
+        m_QuadTreeSRVHeap = MakeScope<DescriptorHeap>(m_Device, srvHeapDesc);
+        if (!m_QuadTreeSRVHeap->Initialize())
+        {
+            SEA_CORE_ERROR("Failed to create QuadTree SRV heap");
+            return false;
+        }
+
+        // 创建实例缓冲区的 SRV
+        D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+        srvDesc.Format = DXGI_FORMAT_UNKNOWN;
+        srvDesc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
+        srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        srvDesc.Buffer.FirstElement = 0;
+        srvDesc.Buffer.NumElements = 4096;  // 最大实例数
+        srvDesc.Buffer.StructureByteStride = sizeof(OceanQuadInstance);
+        srvDesc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
+
+        m_Device.GetDevice()->CreateShaderResourceView(
+            m_QuadTree->GetInstanceBuffer()->GetResource(),
+            &srvDesc,
+            m_QuadTreeSRVHeap->GetCPUHandle(0)
+        );
+
+        // 编译着色器
+        std::string vsPath = "Shaders/Ocean/OceanQuadTree_VS.hlsl";
+        std::string psPath = "Shaders/Ocean/OceanQuadTree_PS.hlsl";  // 使用专用 PS (无纹理依赖)
+
+        ShaderCompileDesc vsDesc;
+        vsDesc.filePath = vsPath;
+        vsDesc.entryPoint = "VSMain";
+        vsDesc.stage = ShaderStage::Vertex;
+        vsDesc.model = ShaderModel::SM_6_0;
+        auto vsResult = ShaderCompiler::Compile(vsDesc);
+
+        ShaderCompileDesc psDesc;
+        psDesc.filePath = psPath;
+        psDesc.entryPoint = "PSMain";
+        psDesc.stage = ShaderStage::Pixel;
+        psDesc.model = ShaderModel::SM_6_0;
+        auto psResult = ShaderCompiler::Compile(psDesc);
+
+        if (!vsResult.success || !psResult.success)
+        {
+            SEA_CORE_ERROR("Failed to compile QuadTree shaders: VS={}, PS={}",
+                          vsResult.errors, psResult.errors);
+            return false;
+        }
+
+        // 输入布局
+        std::vector<D3D12_INPUT_ELEMENT_DESC> inputLayout = {
+            { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+            { "NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+            { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 24, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+            { "COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 32, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
+        };
+
+        // 创建 PSO
+        GraphicsPipelineDesc psoDesc;
+        psoDesc.rootSignature = m_QuadTreeRootSig.get();
+        psoDesc.vertexShader = vsResult.bytecode;
+        psoDesc.pixelShader = psResult.bytecode;
+        psoDesc.inputLayout = inputLayout;
+        psoDesc.rtvFormats = { Format::R16G16B16A16_FLOAT };
+        psoDesc.dsvFormat = Format::D32_FLOAT;
+        psoDesc.depthEnable = true;
+        psoDesc.depthWrite = true;
+        psoDesc.cullMode = CullMode::None;
+        psoDesc.fillMode = FillMode::Solid;
+
+        m_QuadTreePSO = PipelineState::CreateGraphics(m_Device, psoDesc);
+        if (!m_QuadTreePSO)
+        {
+            SEA_CORE_ERROR("Failed to create QuadTree PSO");
+            return false;
+        }
+
+        // Wireframe PSO
+        GraphicsPipelineDesc wireframeDesc = psoDesc;
+        wireframeDesc.fillMode = FillMode::Wireframe;
+        m_QuadTreeWireframePSO = PipelineState::CreateGraphics(m_Device, wireframeDesc);
+
+        SEA_CORE_INFO("QuadTree pipeline created successfully");
         return true;
     }
 
@@ -255,9 +440,30 @@ namespace Sea
         // （完整实现需要Compute Shader执行FFT）
     }
 
+    bool Ocean::RecompileShaders()
+    {
+        SEA_CORE_INFO("Recompiling Ocean shaders...");
+        
+        // 释放旧的 PSO（保留 Root Signature）
+        m_RenderPSO.reset();
+        m_WireframePSO.reset();
+        m_NormalsPSO.reset();
+        m_RenderRootSig.reset();
+        
+        // 重新创建 Pipeline
+        if (!CreateRenderPipeline())
+        {
+            SEA_CORE_ERROR("Failed to recompile Ocean shaders");
+            return false;
+        }
+        
+        SEA_CORE_INFO("Ocean shaders recompiled successfully");
+        return true;
+    }
+
     void Ocean::Render(CommandList& cmdList, const Camera& camera)
     {
-        if (!m_Initialized || !m_OceanMesh) return;
+        if (!m_Initialized) return;
 
         auto* cmdListPtr = cmdList.GetCommandList();
 
@@ -275,30 +481,109 @@ namespace Sea
         XMFLOAT3 camPos = camera.GetPosition();
         cbData.cameraPos = { camPos.x, camPos.y, camPos.z, 1.0f };
         
-        cbData.oceanParams = { m_Params.patchSize, m_Params.gridSize, m_Time, m_Params.amplitude };
-        cbData.sunDirection = { m_SunDirection.x, m_SunDirection.y, m_SunDirection.z, 0.0f };
+        // Ocean parameters
+        cbData.oceanParams = { m_Params.patchSize, m_Params.gridSize, m_Time, m_Params.choppiness };
+        
+        // Sun direction with intensity
+        cbData.sunDirection = { m_SunDirection.x, m_SunDirection.y, m_SunDirection.z, m_Params.sunIntensity };
+        
+        // Colors
         cbData.oceanColor = m_OceanColor;
         cbData.skyColor = m_SkyColor;
+        cbData.scatterColor = m_ScatterColor;
+        
+        // Foam parameters - 注意: w 分量用于 SSS 强度
+        cbData.foamParams = { m_Params.foamIntensity, m_Params.foamScale, m_Params.whitecapThreshold, m_Params.sssStrength };
+        
+        // Atmosphere parameters
+        cbData.atmosphereParams = { m_Params.fogDensity, m_Params.fogHeightFalloff, m_Params.sunDiskSize, 0.0f };
 
         m_OceanCB->Update(&cbData, sizeof(cbData));
 
-        // 设置管线状态
-        cmdListPtr->SetPipelineState(m_RenderPSO->GetPipelineState());
-        cmdListPtr->SetGraphicsRootSignature(m_RenderRootSig->GetRootSignature());
+        // 使用四叉树 LOD 渲染
+        if (m_UseQuadTree && m_QuadTree && m_QuadTreePSO)
+        {
+            // 更新四叉树
+            m_QuadTree->Update(camera);
+            
+            u32 instanceCount = m_QuadTree->GetInstanceCount();
+            if (instanceCount == 0) return;
+            
+            // 选择 PSO
+            if (m_ViewMode == 1 && m_QuadTreeWireframePSO)
+            {
+                cmdListPtr->SetPipelineState(m_QuadTreeWireframePSO->GetPipelineState());
+            }
+            else
+            {
+                cmdListPtr->SetPipelineState(m_QuadTreePSO->GetPipelineState());
+            }
+            cmdListPtr->SetGraphicsRootSignature(m_QuadTreeRootSig->GetRootSignature());
 
-        // 绑定常量缓冲
-        cmdListPtr->SetGraphicsRootConstantBufferView(0, m_OceanCB->GetGPUAddress());
+            // 绑定描述符堆
+            ID3D12DescriptorHeap* heaps[] = { m_QuadTreeSRVHeap->GetHeap() };
+            cmdListPtr->SetDescriptorHeaps(1, heaps);
 
-        // 设置图元类型
-        cmdListPtr->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+            // 绑定常量缓冲
+            cmdListPtr->SetGraphicsRootConstantBufferView(0, m_OceanCB->GetGPUAddress());
+            
+            // 绑定实例缓冲 SRV
+            cmdListPtr->SetGraphicsRootDescriptorTable(1, m_QuadTreeSRVHeap->GetGPUHandle(0));
 
-        // 绑定网格并绘制
-        D3D12_VERTEX_BUFFER_VIEW vbv = m_OceanMesh->GetVertexBuffer()->GetVertexBufferView();
-        D3D12_INDEX_BUFFER_VIEW ibv = m_OceanMesh->GetIndexBuffer()->GetIndexBufferView();
-        
-        cmdListPtr->IASetVertexBuffers(0, 1, &vbv);
-        cmdListPtr->IASetIndexBuffer(&ibv);
-        cmdListPtr->DrawIndexedInstanced(m_OceanMesh->GetIndexCount(), 1, 0, 0, 0);
+            // 设置图元类型
+            cmdListPtr->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+            // 绑定基础网格
+            Mesh* baseMesh = m_QuadTree->GetBaseMesh();
+            D3D12_VERTEX_BUFFER_VIEW vbv = baseMesh->GetVertexBuffer()->GetVertexBufferView();
+            D3D12_INDEX_BUFFER_VIEW ibv = baseMesh->GetIndexBuffer()->GetIndexBufferView();
+            
+            cmdListPtr->IASetVertexBuffers(0, 1, &vbv);
+            cmdListPtr->IASetIndexBuffer(&ibv);
+            
+            // 实例化绘制
+            cmdListPtr->DrawIndexedInstanced(baseMesh->GetIndexCount(), instanceCount, 0, 0, 0);
+        }
+        else
+        {
+            // 使用简单网格渲染 (fallback)
+            if (!m_OceanMesh) return;
+            
+            // 根据视图模式选择 PSO
+            switch (m_ViewMode)
+            {
+            case 1: // Wireframe
+                if (m_WireframePSO)
+                    cmdListPtr->SetPipelineState(m_WireframePSO->GetPipelineState());
+                else
+                    cmdListPtr->SetPipelineState(m_RenderPSO->GetPipelineState());
+                break;
+            case 2: // Normals
+                if (m_NormalsPSO)
+                    cmdListPtr->SetPipelineState(m_NormalsPSO->GetPipelineState());
+                else
+                    cmdListPtr->SetPipelineState(m_RenderPSO->GetPipelineState());
+                break;
+            default: // Lit (0)
+                cmdListPtr->SetPipelineState(m_RenderPSO->GetPipelineState());
+                break;
+            }
+            cmdListPtr->SetGraphicsRootSignature(m_RenderRootSig->GetRootSignature());
+
+            // 绑定常量缓冲
+            cmdListPtr->SetGraphicsRootConstantBufferView(0, m_OceanCB->GetGPUAddress());
+
+            // 设置图元类型
+            cmdListPtr->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+            // 绑定网格并绘制
+            D3D12_VERTEX_BUFFER_VIEW vbv = m_OceanMesh->GetVertexBuffer()->GetVertexBufferView();
+            D3D12_INDEX_BUFFER_VIEW ibv = m_OceanMesh->GetIndexBuffer()->GetIndexBufferView();
+            
+            cmdListPtr->IASetVertexBuffers(0, 1, &vbv);
+            cmdListPtr->IASetIndexBuffer(&ibv);
+            cmdListPtr->DrawIndexedInstanced(m_OceanMesh->GetIndexCount(), 1, 0, 0, 0);
+        }
     }
 
     // 以下是完整FFT实现所需的方法（待后续完善）

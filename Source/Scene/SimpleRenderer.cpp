@@ -35,9 +35,33 @@ namespace Sea
         m_ObjectConstantBuffer.reset();
         m_FrameConstantBuffer.reset();
         m_GridPSO.reset();
+        m_NormalsPSO.reset();
+        m_WireframePSO.reset();
         m_PBRPSO.reset();
         m_BasicPSO.reset();
         m_RootSignature.reset();
+    }
+
+    bool SimpleRenderer::RecompileShaders()
+    {
+        SEA_CORE_INFO("Recompiling SimpleRenderer shaders...");
+        
+        // 释放旧的 PSO
+        m_GridPSO.reset();
+        m_NormalsPSO.reset();
+        m_WireframePSO.reset();
+        m_PBRPSO.reset();
+        m_BasicPSO.reset();
+        
+        // 重新创建 PSO
+        if (!CreatePipelineStates())
+        {
+            SEA_CORE_ERROR("Failed to recompile shaders");
+            return false;
+        }
+        
+        SEA_CORE_INFO("SimpleRenderer shaders recompiled successfully");
+        return true;
     }
 
     bool SimpleRenderer::CreateRootSignature()
@@ -174,12 +198,12 @@ namespace Sea
             return false;
         }
 
-        // PBR shader
-        std::string pbrShaderPath = "Shaders/PBR.hlsl";
+        // PBR shader - 使用简化版 (不需要纹理)
+        std::string pbrShaderPath = "Shaders/PBRSimple.hlsl";
         
         ShaderCompileDesc pbrVsDesc;
         pbrVsDesc.filePath = pbrShaderPath;
-        pbrVsDesc.entryPoint = "VSMainSimple";  // 使用简化版 (自动生成切线)
+        pbrVsDesc.entryPoint = "VSMain";
         pbrVsDesc.stage = ShaderStage::Vertex;
         pbrVsDesc.model = ShaderModel::SM_6_0;
         auto pbrVsResult = ShaderCompiler::Compile(pbrVsDesc);
@@ -200,6 +224,9 @@ namespace Sea
         }
         else
         {
+            SEA_CORE_INFO("PBR shaders compiled: VS {} bytes, PS {} bytes", 
+                         pbrVsResult.bytecode.size(), pbrPsResult.bytecode.size());
+            
             GraphicsPipelineDesc pbrDesc;
             pbrDesc.rootSignature = m_RootSignature.get();
             pbrDesc.vertexShader = pbrVsResult.bytecode;
@@ -220,6 +247,76 @@ namespace Sea
             else
             {
                 SEA_CORE_INFO("PBR pipeline created successfully");
+            }
+        }
+
+        // ========== Wireframe PSO ==========
+        // 使用 Basic shader 但设置为 Wireframe 填充模式
+        GraphicsPipelineDesc wireframeDesc;
+        wireframeDesc.rootSignature = m_RootSignature.get();
+        wireframeDesc.vertexShader = vsResult.bytecode;
+        wireframeDesc.pixelShader = psResult.bytecode;
+        wireframeDesc.inputLayout = inputLayout;
+        wireframeDesc.rtvFormats = { Format::R16G16B16A16_FLOAT };
+        wireframeDesc.dsvFormat = Format::D32_FLOAT;
+        wireframeDesc.depthEnable = true;
+        wireframeDesc.depthWrite = true;
+        wireframeDesc.cullMode = CullMode::None;     // 不剔除以显示所有线框
+        wireframeDesc.fillMode = FillMode::Wireframe;
+
+        m_WireframePSO = PipelineState::CreateGraphics(m_Device, wireframeDesc);
+        if (!m_WireframePSO)
+        {
+            SEA_CORE_WARN("Failed to create Wireframe PSO");
+        }
+        else
+        {
+            SEA_CORE_INFO("Wireframe pipeline created successfully");
+        }
+
+        // ========== Debug Normals PSO ==========
+        std::string normalsShaderPath = "Shaders/DebugNormals.hlsl";
+        
+        ShaderCompileDesc normalsVsDesc;
+        normalsVsDesc.filePath = normalsShaderPath;
+        normalsVsDesc.entryPoint = "VSMain";
+        normalsVsDesc.stage = ShaderStage::Vertex;
+        normalsVsDesc.model = ShaderModel::SM_6_0;
+        auto normalsVsResult = ShaderCompiler::Compile(normalsVsDesc);
+
+        ShaderCompileDesc normalsPsDesc;
+        normalsPsDesc.filePath = normalsShaderPath;
+        normalsPsDesc.entryPoint = "PSMain";
+        normalsPsDesc.stage = ShaderStage::Pixel;
+        normalsPsDesc.model = ShaderModel::SM_6_0;
+        auto normalsPsResult = ShaderCompiler::Compile(normalsPsDesc);
+
+        if (!normalsVsResult.success || !normalsPsResult.success)
+        {
+            SEA_CORE_WARN("Failed to compile DebugNormals shaders: {} {}", 
+                         normalsVsResult.errors, normalsPsResult.errors);
+        }
+        else
+        {
+            GraphicsPipelineDesc normalsDesc;
+            normalsDesc.rootSignature = m_RootSignature.get();
+            normalsDesc.vertexShader = normalsVsResult.bytecode;
+            normalsDesc.pixelShader = normalsPsResult.bytecode;
+            normalsDesc.inputLayout = inputLayout;
+            normalsDesc.rtvFormats = { Format::R16G16B16A16_FLOAT };
+            normalsDesc.dsvFormat = Format::D32_FLOAT;
+            normalsDesc.depthEnable = true;
+            normalsDesc.depthWrite = true;
+            normalsDesc.cullMode = CullMode::Back;
+
+            m_NormalsPSO = PipelineState::CreateGraphics(m_Device, normalsDesc);
+            if (!m_NormalsPSO)
+            {
+                SEA_CORE_WARN("Failed to create Normals PSO");
+            }
+            else
+            {
+                SEA_CORE_INFO("Debug Normals pipeline created successfully");
             }
         }
 
@@ -326,14 +423,39 @@ namespace Sea
         auto* d3dCmdList = cmdList.GetCommandList();
         d3dCmdList->SetGraphicsRootSignature(m_RootSignature->GetRootSignature());
         
-        // 选择 PBR 或 Basic 管线
-        if (m_UsePBR && m_PBRPSO)
+        // 根据视图模式选择 PSO
+        switch (m_ViewMode)
         {
-            d3dCmdList->SetPipelineState(m_PBRPSO->GetPipelineState());
-        }
-        else
-        {
-            d3dCmdList->SetPipelineState(m_BasicPSO->GetPipelineState());
+        case 1: // Wireframe
+            if (m_WireframePSO)
+            {
+                d3dCmdList->SetPipelineState(m_WireframePSO->GetPipelineState());
+            }
+            else
+            {
+                d3dCmdList->SetPipelineState(m_BasicPSO->GetPipelineState());
+            }
+            break;
+        case 2: // Normals
+            if (m_NormalsPSO)
+            {
+                d3dCmdList->SetPipelineState(m_NormalsPSO->GetPipelineState());
+            }
+            else
+            {
+                d3dCmdList->SetPipelineState(m_BasicPSO->GetPipelineState());
+            }
+            break;
+        default: // Lit (0)
+            if (m_UsePBR && m_PBRPSO)
+            {
+                d3dCmdList->SetPipelineState(m_PBRPSO->GetPipelineState());
+            }
+            else
+            {
+                d3dCmdList->SetPipelineState(m_BasicPSO->GetPipelineState());
+            }
+            break;
         }
 
         // 设置常量缓冲 - 使用偏移后的地址

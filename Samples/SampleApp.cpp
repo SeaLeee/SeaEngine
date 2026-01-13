@@ -4,6 +4,7 @@
 #include "Graphics/RenderDocCapture.h"
 #include "Scene/SceneManager.h"
 #include "Scene/TonemapRenderer.h"
+#include "Shader/ShaderCompiler.h"
 #include <imgui_internal.h>
 #include <filesystem>
 
@@ -567,10 +568,9 @@ namespace Sea
             if (Input::IsKeyDown(KeyCode::E)) up = 1;
             if (Input::IsKeyDown(KeyCode::Q)) up = -1;
 
-            // Shift 加速
-            f32 speed = Input::IsKeyDown(KeyCode::Shift) ? 3.0f : 1.0f;
-            m_Camera->SetMoveSpeed(5.0f * speed);
-            m_Camera->ProcessKeyboard(forward, right, up, deltaTime);
+            // Shift 加速 (使用乘法因子，不覆盖用户设置的基础速度)
+            f32 speedMultiplier = Input::IsKeyDown(KeyCode::Shift) ? 3.0f : 1.0f;
+            m_Camera->ProcessKeyboard(forward * speedMultiplier, right * speedMultiplier, up * speedMultiplier, deltaTime);
         }
         else
         {
@@ -933,14 +933,27 @@ namespace Sea
             ImGui::BeginChild("ViewportToolbar", ImVec2(0, 30), true);
             {
                 // 视图模式
-                static int viewMode = 0;
                 ImGui::Text("View:");
                 ImGui::SameLine();
-                ImGui::RadioButton("Lit", &viewMode, 0);
+                ImGui::RadioButton("Lit", &m_ViewMode, 0);
                 ImGui::SameLine();
-                ImGui::RadioButton("Wireframe", &viewMode, 1);
+                ImGui::RadioButton("Wireframe", &m_ViewMode, 1);
                 ImGui::SameLine();
-                ImGui::RadioButton("Normals", &viewMode, 2);
+                ImGui::RadioButton("Normals", &m_ViewMode, 2);
+                
+                // 更新渲染器的视图模式
+                if (m_Renderer)
+                {
+                    m_Renderer->SetViewMode(m_ViewMode);
+                }
+                if (m_DeferredRenderer)
+                {
+                    m_DeferredRenderer->SetViewMode(m_ViewMode);
+                }
+                if (m_Ocean)
+                {
+                    m_Ocean->SetViewMode(m_ViewMode);
+                }
                 
                 ImGui::SameLine(ImGui::GetWindowWidth() - 250);
                 ImGui::Text("%ux%u | FPS: %.0f", m_ViewportWidth, m_ViewportHeight, ImGui::GetIO().Framerate);
@@ -967,6 +980,81 @@ namespace Sea
                     (ImTextureID)m_SceneTextureHandle.ptr,
                     renderSize
                 );
+                
+                // 拖放目标 - 从资源浏览器拖入模型
+                if (ImGui::BeginDragDropTarget())
+                {
+                    // 处理内置几何体拖放
+                    if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("ASSET_ITEM"))
+                    {
+                        const char* assetType = static_cast<const char*>(payload->Data);
+                        
+                        if (strcmp(assetType, "BUILTIN_CUBE") == 0)
+                        {
+                            auto mesh = Mesh::CreateCube(*m_Device, 1.0f);
+                            if (mesh)
+                            {
+                                SceneObject obj;
+                                obj.mesh = mesh.get();
+                                XMStoreFloat4x4(&obj.transform, XMMatrixTranslation(0, 0.5f, 0));
+                                obj.color = { 0.8f, 0.4f, 0.2f, 1.0f };
+                                m_Meshes.push_back(std::move(mesh));
+                                m_SceneObjects.push_back(obj);
+                            }
+                        }
+                        else if (strcmp(assetType, "BUILTIN_SPHERE") == 0)
+                        {
+                            auto mesh = Mesh::CreateSphere(*m_Device, 0.5f, 32, 16);
+                            if (mesh)
+                            {
+                                SceneObject obj;
+                                obj.mesh = mesh.get();
+                                XMStoreFloat4x4(&obj.transform, XMMatrixTranslation(0, 0.5f, 0));
+                                obj.color = { 0.2f, 0.6f, 0.9f, 1.0f };
+                                m_Meshes.push_back(std::move(mesh));
+                                m_SceneObjects.push_back(obj);
+                            }
+                        }
+                        else if (strcmp(assetType, "BUILTIN_TORUS") == 0)
+                        {
+                            auto mesh = Mesh::CreateTorus(*m_Device, 0.6f, 0.2f, 32, 24);
+                            if (mesh)
+                            {
+                                SceneObject obj;
+                                obj.mesh = mesh.get();
+                                XMStoreFloat4x4(&obj.transform, XMMatrixTranslation(0, 0.5f, 0));
+                                obj.color = { 0.9f, 0.3f, 0.8f, 1.0f };
+                                m_Meshes.push_back(std::move(mesh));
+                                m_SceneObjects.push_back(obj);
+                            }
+                        }
+                        else if (strcmp(assetType, "BUILTIN_PLANE") == 0)
+                        {
+                            auto mesh = Mesh::CreatePlane(*m_Device, 5.0f, 5.0f);
+                            if (mesh)
+                            {
+                                SceneObject obj;
+                                obj.mesh = mesh.get();
+                                XMStoreFloat4x4(&obj.transform, XMMatrixIdentity());
+                                obj.color = { 0.5f, 0.5f, 0.5f, 1.0f };
+                                m_Meshes.push_back(std::move(mesh));
+                                m_SceneObjects.push_back(obj);
+                            }
+                        }
+                    }
+                    
+                    // 处理外部模型拖放
+                    if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("MODEL_PATH"))
+                    {
+                        size_t modelIndex = *static_cast<const size_t*>(payload->Data);
+                        if (modelIndex < m_AvailableModels.size())
+                        {
+                            LoadExternalModel(m_AvailableModels[modelIndex]);
+                        }
+                    }
+                    
+                    ImGui::EndDragDropTarget();
+                }
                 
                 // 检查视口是否被鼠标悬停（用于相机控制）
                 if (ImGui::IsItemHovered())
@@ -1018,12 +1106,46 @@ namespace Sea
                     for (size_t i = 0; i < m_SceneObjects.size(); ++i)
                     {
                         char name[64];
-                        if (i < 5) snprintf(name, sizeof(name), "[M] Cube_%zu", i);
-                        else if (i < 10) snprintf(name, sizeof(name), "[M] Sphere_%zu", i - 5);
-                        else snprintf(name, sizeof(name), "[M] Torus_%zu", i - 10);
+                        snprintf(name, sizeof(name), "[M] Object_%zu", i);
                         
                         ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
+                        if (m_SelectedObjectIndex == static_cast<int>(i))
+                        {
+                            flags |= ImGuiTreeNodeFlags_Selected;
+                        }
+                        
                         ImGui::TreeNodeEx(name, flags);
+                        
+                        // 点击选择对象
+                        if (ImGui::IsItemClicked())
+                        {
+                            m_SelectedObjectIndex = static_cast<int>(i);
+                        }
+                        
+                        // 右键菜单
+                        if (ImGui::BeginPopupContextItem())
+                        {
+                            if (ImGui::MenuItem("Delete"))
+                            {
+                                m_SceneObjects.erase(m_SceneObjects.begin() + i);
+                                if (m_SelectedObjectIndex >= static_cast<int>(m_SceneObjects.size()))
+                                {
+                                    m_SelectedObjectIndex = -1;
+                                }
+                                ImGui::EndPopup();
+                                break;  // 退出循环因为容器已更改
+                            }
+                            if (ImGui::MenuItem("Duplicate"))
+                            {
+                                SceneObject copy = m_SceneObjects[i];
+                                // 稍微偏移位置
+                                XMMATRIX transform = XMLoadFloat4x4(&copy.transform);
+                                transform = transform * XMMatrixTranslation(1.0f, 0.0f, 0.0f);
+                                XMStoreFloat4x4(&copy.transform, transform);
+                                m_SceneObjects.push_back(copy);
+                            }
+                            ImGui::EndPopup();
+                        }
                     }
                     ImGui::TreePop();
                 }
@@ -1035,6 +1157,14 @@ namespace Sea
                 
                 ImGui::TreePop();
             }
+            
+            // 场景信息
+            ImGui::Separator();
+            ImGui::Text("Objects: %zu", m_SceneObjects.size());
+            if (m_SelectedObjectIndex >= 0)
+            {
+                ImGui::Text("Selected: Object_%d", m_SelectedObjectIndex);
+            }
         }
         ImGui::End();
     }
@@ -1045,7 +1175,114 @@ namespace Sea
         
         if (ImGui::Begin("Inspector", &m_ShowInspector))
         {
-            ImGui::Text("Select an object to inspect");
+            // 选中对象的详细信息
+            if (m_SelectedObjectIndex >= 0 && m_SelectedObjectIndex < static_cast<int>(m_SceneObjects.size()))
+            {
+                SceneObject& obj = m_SceneObjects[m_SelectedObjectIndex];
+                
+                ImGui::Text("Object_%d", m_SelectedObjectIndex);
+                ImGui::Separator();
+                
+                // Transform 编辑
+                if (ImGui::CollapsingHeader("Transform", ImGuiTreeNodeFlags_DefaultOpen))
+                {
+                    XMMATRIX transform = XMLoadFloat4x4(&obj.transform);
+                    
+                    // 提取位置
+                    XMFLOAT3 position;
+                    position.x = obj.transform._41;
+                    position.y = obj.transform._42;
+                    position.z = obj.transform._43;
+                    
+                    if (ImGui::DragFloat3("Position", &position.x, 0.1f))
+                    {
+                        obj.transform._41 = position.x;
+                        obj.transform._42 = position.y;
+                        obj.transform._43 = position.z;
+                    }
+                    
+                    // 简单缩放 (假设统一缩放)
+                    static float scale = 1.0f;
+                    if (ImGui::DragFloat("Scale", &scale, 0.01f, 0.01f, 10.0f))
+                    {
+                        // 重建变换矩阵
+                        XMMATRIX scaleMatrix = XMMatrixScaling(scale, scale, scale);
+                        XMMATRIX translationMatrix = XMMatrixTranslation(position.x, position.y, position.z);
+                        XMStoreFloat4x4(&obj.transform, scaleMatrix * translationMatrix);
+                    }
+                }
+                
+                // Material 编辑
+                if (ImGui::CollapsingHeader("Material", ImGuiTreeNodeFlags_DefaultOpen))
+                {
+                    ImGui::ColorEdit4("Base Color", &obj.color.x);
+                    ImGui::SliderFloat("Metallic", &obj.metallic, 0.0f, 1.0f);
+                    ImGui::SliderFloat("Roughness", &obj.roughness, 0.0f, 1.0f);
+                    ImGui::SliderFloat("AO", &obj.ao, 0.0f, 1.0f);
+                    
+                    ImGui::Separator();
+                    ImGui::Text("Emissive");
+                    ImGui::ColorEdit3("Emissive Color", &obj.emissiveColor.x);
+                    ImGui::SliderFloat("Emissive Intensity", &obj.emissiveIntensity, 0.0f, 10.0f);
+                    
+                    ImGui::Separator();
+                    
+                    // 材质预设
+                    ImGui::Text("Presets:");
+                    if (ImGui::Button("Metal"))
+                    {
+                        obj.metallic = 1.0f;
+                        obj.roughness = 0.3f;
+                        obj.color = { 0.9f, 0.9f, 0.9f, 1.0f };
+                    }
+                    ImGui::SameLine();
+                    if (ImGui::Button("Plastic"))
+                    {
+                        obj.metallic = 0.0f;
+                        obj.roughness = 0.4f;
+                    }
+                    ImGui::SameLine();
+                    if (ImGui::Button("Gold"))
+                    {
+                        obj.metallic = 1.0f;
+                        obj.roughness = 0.2f;
+                        obj.color = { 1.0f, 0.766f, 0.336f, 1.0f };
+                    }
+                    ImGui::SameLine();
+                    if (ImGui::Button("Rubber"))
+                    {
+                        obj.metallic = 0.0f;
+                        obj.roughness = 0.9f;
+                        obj.color = { 0.1f, 0.1f, 0.1f, 1.0f };
+                    }
+                    
+                    if (ImGui::Button("Copper"))
+                    {
+                        obj.metallic = 1.0f;
+                        obj.roughness = 0.25f;
+                        obj.color = { 0.955f, 0.637f, 0.538f, 1.0f };
+                    }
+                    ImGui::SameLine();
+                    if (ImGui::Button("Chrome"))
+                    {
+                        obj.metallic = 1.0f;
+                        obj.roughness = 0.1f;
+                        obj.color = { 0.55f, 0.55f, 0.55f, 1.0f };
+                    }
+                    ImGui::SameLine();
+                    if (ImGui::Button("Wood"))
+                    {
+                        obj.metallic = 0.0f;
+                        obj.roughness = 0.6f;
+                        obj.color = { 0.6f, 0.4f, 0.2f, 1.0f };
+                    }
+                }
+            }
+            else
+            {
+                ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f), "Select an object in Hierarchy to edit");
+            }
+            
             ImGui::Separator();
             
             // 光照设置 - 始终显示
@@ -1112,154 +1349,221 @@ namespace Sea
         
         if (ImGui::Begin("Asset Browser", &m_ShowAssetBrowser))
         {
-            // 标签页
-            if (ImGui::BeginTabBar("AssetTabs"))
+            // 路径导航栏
+            ImGui::Text("Path:");
+            ImGui::SameLine();
+            if (ImGui::Button("Assets"))
             {
-                // Shaders 标签页
-                if (ImGui::BeginTabItem("Shaders"))
+                m_CurrentAssetPath = "Assets";
+            }
+            
+            // 显示当前路径下的目录
+            std::filesystem::path currentPath(m_CurrentAssetPath);
+            if (std::filesystem::exists(currentPath))
+            {
+                // 显示子目录按钮
+                auto relativePath = std::filesystem::relative(currentPath, "Assets");
+                if (!relativePath.empty() && relativePath.string() != ".")
                 {
-                    ImGui::Text("> Assets > Shaders");
-                    ImGui::Separator();
-                    
-                    float iconSize = 64.0f;
-                    float padding = 16.0f;
-                    int columns = static_cast<int>((ImGui::GetContentRegionAvail().x) / (iconSize + padding));
-                    if (columns < 1) columns = 1;
-                    
-                    if (ImGui::BeginTable("ShaderGrid", columns))
+                    ImGui::SameLine();
+                    ImGui::Text(">");
+                    for (auto& part : relativePath)
                     {
-                        const char* shaders[] = { 
-                            "[S] Basic.hlsl", 
-                            "[S] Grid.hlsl", 
-                            "[S] GBuffer.hlsl",
-                            "[S] Tonemap.hlsl",
-                            "[S] Common.hlsli"
-                        };
-                        
-                        for (int i = 0; i < 5; ++i)
+                        ImGui::SameLine();
+                        if (ImGui::Button(part.string().c_str()))
                         {
-                            ImGui::TableNextColumn();
-                            ImGui::PushID(i);
-                            if (ImGui::Button(shaders[i], ImVec2(iconSize + 20, iconSize)))
-                            {
-                                // 选择 Shader
-                            }
-                            ImGui::PopID();
+                            // 导航到该路径
                         }
-                        ImGui::EndTable();
                     }
-                    ImGui::EndTabItem();
                 }
-                
-                // Models 标签页
-                if (ImGui::BeginTabItem("Models"))
+            }
+            
+            ImGui::Separator();
+            
+            // 返回上级目录按钮
+            if (m_CurrentAssetPath != "Assets")
+            {
+                if (ImGui::Button(".. [Up]"))
                 {
-                    ImGui::Text("> Assets > Models");
-                    ImGui::Separator();
-                    
-                    // 刷新按钮
-                    if (ImGui::Button("Refresh Models"))
-                    {
-                        ScanAvailableModels();
-                    }
-                    ImGui::SameLine();
-                    ImGui::Text("Found: %zu models", m_AvailableModels.size());
-                    ImGui::Separator();
-                    
-                    // 内置几何体
-                    ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "Built-in Geometry:");
-                    float iconSize = 80.0f;
-                    
-                    if (ImGui::Button("[Cube]", ImVec2(iconSize, iconSize / 2)))
-                    {
-                        auto cube = Mesh::CreateCube(*m_Device, 1.0f);
-                        if (cube)
-                        {
-                            SceneObject obj;
-                            obj.mesh = cube.get();
-                            XMStoreFloat4x4(&obj.transform, XMMatrixTranslation(0, 0.5f, 0));
-                            obj.color = { 0.8f, 0.4f, 0.2f, 1.0f };
-                            m_Meshes.push_back(std::move(cube));
-                            m_SceneObjects.push_back(obj);
-                        }
-                    }
-                    ImGui::SameLine();
-                    if (ImGui::Button("[Sphere]", ImVec2(iconSize, iconSize / 2)))
-                    {
-                        auto sphere = Mesh::CreateSphere(*m_Device, 0.5f, 32, 16);
-                        if (sphere)
-                        {
-                            SceneObject obj;
-                            obj.mesh = sphere.get();
-                            XMStoreFloat4x4(&obj.transform, XMMatrixTranslation(0, 0.5f, 0));
-                            obj.color = { 0.2f, 0.6f, 0.9f, 1.0f };
-                            m_Meshes.push_back(std::move(sphere));
-                            m_SceneObjects.push_back(obj);
-                        }
-                    }
-                    ImGui::SameLine();
-                    if (ImGui::Button("[Torus]", ImVec2(iconSize, iconSize / 2)))
-                    {
-                        auto torus = Mesh::CreateTorus(*m_Device, 0.6f, 0.2f, 32, 24);
-                        if (torus)
-                        {
-                            SceneObject obj;
-                            obj.mesh = torus.get();
-                            XMStoreFloat4x4(&obj.transform, XMMatrixTranslation(0, 0.5f, 0));
-                            obj.color = { 0.9f, 0.3f, 0.8f, 1.0f };
-                            m_Meshes.push_back(std::move(torus));
-                            m_SceneObjects.push_back(obj);
-                        }
-                    }
-                    
-                    ImGui::Spacing();
-                    ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "External OBJ Models:");
-                    ImGui::Separator();
-                    
-                    // 外部 OBJ 模型列表
-                    if (m_AvailableModels.empty())
-                    {
-                        ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "No OBJ models found in Assets/Models/");
-                        ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "Place .obj files there and click Refresh");
-                    }
-                    else
-                    {
-                        for (size_t i = 0; i < m_AvailableModels.size(); ++i)
-                        {
-                            std::filesystem::path p(m_AvailableModels[i]);
-                            std::string filename = p.filename().string();
-                            
-                            ImGui::PushID(static_cast<int>(i));
-                            
-                            bool isSelected = (m_SelectedModelIndex == static_cast<int>(i));
-                            if (ImGui::Selectable(filename.c_str(), isSelected, 0, ImVec2(0, 24)))
-                            {
-                                m_SelectedModelIndex = static_cast<int>(i);
-                            }
-                            
-                            ImGui::SameLine(ImGui::GetWindowWidth() - 100);
-                            if (ImGui::SmallButton("Load"))
-                            {
-                                LoadExternalModel(m_AvailableModels[i]);
-                            }
-                            
-                            ImGui::PopID();
-                        }
-                    }
-                    
-                    ImGui::Spacing();
-                    ImGui::Separator();
-                    ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.5f, 1.0f), "Scene Objects: %zu", m_SceneObjects.size());
-                    
-                    if (ImGui::Button("Clear All Objects"))
-                    {
-                        m_SceneObjects.clear();
-                    }
-                    
-                    ImGui::EndTabItem();
+                    std::filesystem::path p(m_CurrentAssetPath);
+                    m_CurrentAssetPath = p.parent_path().string();
                 }
-                
-                ImGui::EndTabBar();
+                ImGui::Separator();
+            }
+            
+            // 刷新按钮
+            if (ImGui::Button("Refresh"))
+            {
+                ScanAvailableModels();
+            }
+            ImGui::SameLine();
+            ImGui::Text("Drag items to Viewport to add to scene");
+            
+            ImGui::Separator();
+            
+            // 内置几何体区域
+            ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "Built-in Geometry (Drag to Viewport):");
+            float iconSize = 80.0f;
+            
+            // Cube - 可拖拽
+            ImGui::Button("[Cube]", ImVec2(iconSize, iconSize / 2));
+            if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None))
+            {
+                const char* type = "BUILTIN_CUBE";
+                ImGui::SetDragDropPayload("ASSET_ITEM", type, strlen(type) + 1);
+                ImGui::Text("Drag to add Cube");
+                ImGui::EndDragDropSource();
+            }
+            if (ImGui::IsItemClicked())
+            {
+                auto cube = Mesh::CreateCube(*m_Device, 1.0f);
+                if (cube)
+                {
+                    SceneObject obj;
+                    obj.mesh = cube.get();
+                    XMStoreFloat4x4(&obj.transform, XMMatrixTranslation(0, 0.5f, 0));
+                    obj.color = { 0.8f, 0.4f, 0.2f, 1.0f };
+                    m_Meshes.push_back(std::move(cube));
+                    m_SceneObjects.push_back(obj);
+                }
+            }
+            
+            ImGui::SameLine();
+            
+            // Sphere - 可拖拽
+            ImGui::Button("[Sphere]", ImVec2(iconSize, iconSize / 2));
+            if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None))
+            {
+                const char* type = "BUILTIN_SPHERE";
+                ImGui::SetDragDropPayload("ASSET_ITEM", type, strlen(type) + 1);
+                ImGui::Text("Drag to add Sphere");
+                ImGui::EndDragDropSource();
+            }
+            if (ImGui::IsItemClicked())
+            {
+                auto sphere = Mesh::CreateSphere(*m_Device, 0.5f, 32, 16);
+                if (sphere)
+                {
+                    SceneObject obj;
+                    obj.mesh = sphere.get();
+                    XMStoreFloat4x4(&obj.transform, XMMatrixTranslation(0, 0.5f, 0));
+                    obj.color = { 0.2f, 0.6f, 0.9f, 1.0f };
+                    m_Meshes.push_back(std::move(sphere));
+                    m_SceneObjects.push_back(obj);
+                }
+            }
+            
+            ImGui::SameLine();
+            
+            // Torus - 可拖拽
+            ImGui::Button("[Torus]", ImVec2(iconSize, iconSize / 2));
+            if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None))
+            {
+                const char* type = "BUILTIN_TORUS";
+                ImGui::SetDragDropPayload("ASSET_ITEM", type, strlen(type) + 1);
+                ImGui::Text("Drag to add Torus");
+                ImGui::EndDragDropSource();
+            }
+            if (ImGui::IsItemClicked())
+            {
+                auto torus = Mesh::CreateTorus(*m_Device, 0.6f, 0.2f, 32, 24);
+                if (torus)
+                {
+                    SceneObject obj;
+                    obj.mesh = torus.get();
+                    XMStoreFloat4x4(&obj.transform, XMMatrixTranslation(0, 0.5f, 0));
+                    obj.color = { 0.9f, 0.3f, 0.8f, 1.0f };
+                    m_Meshes.push_back(std::move(torus));
+                    m_SceneObjects.push_back(obj);
+                }
+            }
+            
+            ImGui::SameLine();
+            
+            // Plane - 可拖拽
+            ImGui::Button("[Plane]", ImVec2(iconSize, iconSize / 2));
+            if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None))
+            {
+                const char* type = "BUILTIN_PLANE";
+                ImGui::SetDragDropPayload("ASSET_ITEM", type, strlen(type) + 1);
+                ImGui::Text("Drag to add Plane");
+                ImGui::EndDragDropSource();
+            }
+            if (ImGui::IsItemClicked())
+            {
+                auto plane = Mesh::CreatePlane(*m_Device, 5.0f, 5.0f);
+                if (plane)
+                {
+                    SceneObject obj;
+                    obj.mesh = plane.get();
+                    XMStoreFloat4x4(&obj.transform, XMMatrixIdentity());
+                    obj.color = { 0.5f, 0.5f, 0.5f, 1.0f };
+                    m_Meshes.push_back(std::move(plane));
+                    m_SceneObjects.push_back(obj);
+                }
+            }
+            
+            ImGui::Spacing();
+            ImGui::Separator();
+            
+            // 外部模型列表
+            ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "OBJ Models (Drag to Viewport):");
+            
+            if (m_AvailableModels.empty())
+            {
+                ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "No OBJ models found in Assets/Models/");
+            }
+            else
+            {
+                for (size_t i = 0; i < m_AvailableModels.size(); ++i)
+                {
+                    std::filesystem::path p(m_AvailableModels[i]);
+                    std::string filename = p.filename().string();
+                    
+                    ImGui::PushID(static_cast<int>(i));
+                    
+                    // 模型可选择和拖拽
+                    bool isSelected = (m_SelectedModelIndex == static_cast<int>(i));
+                    ImGui::Selectable(filename.c_str(), isSelected, 0, ImVec2(0, 24));
+                    
+                    // 拖拽源
+                    if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None))
+                    {
+                        // 存储模型路径索引
+                        ImGui::SetDragDropPayload("MODEL_PATH", &i, sizeof(size_t));
+                        ImGui::Text("Drag: %s", filename.c_str());
+                        ImGui::EndDragDropSource();
+                    }
+                    
+                    if (ImGui::IsItemClicked())
+                    {
+                        m_SelectedModelIndex = static_cast<int>(i);
+                    }
+                    
+                    // 双击加载
+                    if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0))
+                    {
+                        LoadExternalModel(m_AvailableModels[i]);
+                    }
+                    
+                    ImGui::SameLine(ImGui::GetWindowWidth() - 60);
+                    if (ImGui::SmallButton("Load"))
+                    {
+                        LoadExternalModel(m_AvailableModels[i]);
+                    }
+                    
+                    ImGui::PopID();
+                }
+            }
+            
+            ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.5f, 1.0f), "Scene Objects: %zu", m_SceneObjects.size());
+            
+            if (ImGui::Button("Clear All Objects"))
+            {
+                m_SceneObjects.clear();
+                m_SelectedObjectIndex = -1;
             }
         }
         ImGui::End();
@@ -1347,6 +1651,15 @@ namespace Sea
             // 渲染器设置
             if (ImGui::CollapsingHeader("Renderer", ImGuiTreeNodeFlags_DefaultOpen))
             {
+                // Shader 刷新按钮
+                if (ImGui::Button("Refresh Shaders (F5)"))
+                {
+                    RecompileAllShaders();
+                }
+                ImGui::SameLine();
+                ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "Recompile all shaders");
+                ImGui::Separator();
+                
                 // 渲染管线切换
                 const char* pipelineNames[] = { "Forward", "Deferred" };
                 int pipelineIndex = static_cast<int>(m_CurrentPipeline);
@@ -1571,13 +1884,13 @@ namespace Sea
                 if (m_TonemapRenderer)
                 {
                     auto& tonemapSettings = m_TonemapRenderer->GetSettings();
-                    const char* tonemapOps[] = { "ACES", "Reinhard", "Uncharted 2", "None" };
+                    const char* tonemapOps[] = { "ACES (Unreal)", "Reinhard", "Uncharted 2", "GT (Gran Turismo)", "None" };
                     
                     ImGui::Checkbox("Tone Mapping", &tonemapSettings.Enabled);
                     if (tonemapSettings.Enabled)
                     {
                         ImGui::Indent();
-                        ImGui::Combo("Operator", &tonemapSettings.Operator, tonemapOps, 4);
+                        ImGui::Combo("Operator", &tonemapSettings.Operator, tonemapOps, 5);
                         ImGui::SliderFloat("Exposure", &tonemapSettings.Exposure, 0.1f, 5.0f, "%.2f");
                         ImGui::SliderFloat("Gamma", &tonemapSettings.Gamma, 1.0f, 3.0f, "%.2f");
                         ImGui::Unindent();
@@ -1605,6 +1918,138 @@ namespace Sea
                     ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.5f, 1.0f), "(Not implemented yet)");
                     ImGui::Unindent();
                 }
+                
+                ImGui::Separator();
+                
+                // Shader 调试设置 (用于 RenderDoc)
+                bool shaderDebug = ShaderCompiler::IsGlobalDebugEnabled();
+                if (ImGui::Checkbox("Shader Debug Mode", &shaderDebug))
+                {
+                    ShaderCompiler::SetGlobalDebugEnabled(shaderDebug);
+                }
+                ImGui::SameLine();
+                ImGui::TextDisabled("(?)");
+                if (ImGui::IsItemHovered())
+                {
+                    ImGui::BeginTooltip();
+                    ImGui::Text("Enable shader debugging for RenderDoc.");
+                    ImGui::Text("Shaders will be compiled with debug info");
+                    ImGui::Text("and without optimization.");
+                    ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.5f, 1.0f), 
+                        "Note: Requires shader recompilation to take effect.");
+                    ImGui::EndTooltip();
+                }
+            }
+            
+            // Ocean 渲染设置 (AAA 级)
+            if (m_Ocean && ImGui::CollapsingHeader("Ocean Rendering (AAA)"))
+            {
+                auto& params = m_Ocean->GetParams();
+                
+                // QuadTree LOD 设置
+                bool useQuadTree = m_Ocean->GetUseQuadTree();
+                if (ImGui::Checkbox("QuadTree LOD", &useQuadTree))
+                {
+                    m_Ocean->SetUseQuadTree(useQuadTree);
+                }
+                ImGui::SameLine();
+                if (useQuadTree && m_Ocean->GetQuadTree())
+                {
+                    ImGui::TextColored(ImVec4(0.5f, 1.0f, 0.5f, 1.0f), 
+                        "(%u nodes)", m_Ocean->GetQuadTree()->GetLeafCount());
+                }
+                else
+                {
+                    ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "(Simple mesh)");
+                }
+                
+                ImGui::Separator();
+                
+                // Wave Parameters
+                ImGui::Text("Wave Simulation");
+                ImGui::SliderFloat("Choppiness", &params.choppiness, 0.5f, 3.0f, "%.2f");
+                ImGui::SliderFloat("Wind Speed", &params.windSpeed, 5.0f, 50.0f, "%.1f m/s");
+                
+                float windDir[2] = { params.windDirection.x, params.windDirection.y };
+                if (ImGui::SliderFloat2("Wind Direction", windDir, -1.0f, 1.0f))
+                {
+                    params.windDirection = { windDir[0], windDir[1] };
+                }
+                
+                ImGui::Separator();
+                
+                // Foam / Whitecaps
+                ImGui::Text("Foam & Whitecaps");
+                ImGui::SliderFloat("Foam Intensity", &params.foamIntensity, 0.0f, 3.0f, "%.2f");
+                ImGui::SliderFloat("Foam Scale", &params.foamScale, 0.1f, 2.0f, "%.2f");
+                ImGui::SliderFloat("Whitecap Threshold", &params.whitecapThreshold, 0.1f, 0.8f, "%.2f");
+                
+                ImGui::Separator();
+                
+                // Lighting
+                ImGui::Text("Lighting & Atmosphere");
+                ImGui::SliderFloat("Sun Intensity", &params.sunIntensity, 0.5f, 5.0f, "%.2f");
+                ImGui::SliderFloat("Sun Disk Size", &params.sunDiskSize, 0.001f, 0.05f, "%.3f");
+                ImGui::SliderFloat("Fog Density", &params.fogDensity, 0.0001f, 0.01f, "%.4f");
+                
+                ImGui::Separator();
+                
+                // Colors (advanced)
+                if (ImGui::TreeNode("Ocean Colors"))
+                {
+                    // Get current colors as arrays
+                    float deepColor[4], skyColor[4], scatterColor[4];
+                    
+                    // Deep water color - currently accessed via Ocean internal state
+                    // For now, use default values as placeholders
+                    deepColor[0] = 0.0f; deepColor[1] = 0.03f; deepColor[2] = 0.08f; deepColor[3] = 1.0f;
+                    skyColor[0] = 0.5f; skyColor[1] = 0.7f; skyColor[2] = 0.9f; skyColor[3] = 1.0f;
+                    scatterColor[0] = 0.0f; scatterColor[1] = 0.15f; scatterColor[2] = 0.2f; scatterColor[3] = 1.0f;
+                    
+                    if (ImGui::ColorEdit3("Deep Water", deepColor))
+                    {
+                        m_Ocean->SetOceanColor({ deepColor[0], deepColor[1], deepColor[2], 1.0f });
+                    }
+                    if (ImGui::ColorEdit3("Sky/Horizon", skyColor))
+                    {
+                        m_Ocean->SetSkyColor({ skyColor[0], skyColor[1], skyColor[2], 1.0f });
+                    }
+                    if (ImGui::ColorEdit3("SSS Scatter", scatterColor))
+                    {
+                        m_Ocean->SetScatterColor({ scatterColor[0], scatterColor[1], scatterColor[2], 1.0f });
+                    }
+                    
+                    ImGui::TreePop();
+                }
+                
+                // Presets
+                if (ImGui::TreeNode("Presets"))
+                {
+                    if (ImGui::Button("Calm Sea"))
+                    {
+                        params.choppiness = 0.8f;
+                        params.windSpeed = 8.0f;
+                        params.foamIntensity = 0.3f;
+                        params.whitecapThreshold = 0.6f;
+                    }
+                    ImGui::SameLine();
+                    if (ImGui::Button("Moderate"))
+                    {
+                        params.choppiness = 1.5f;
+                        params.windSpeed = 20.0f;
+                        params.foamIntensity = 1.0f;
+                        params.whitecapThreshold = 0.3f;
+                    }
+                    ImGui::SameLine();
+                    if (ImGui::Button("Stormy"))
+                    {
+                        params.choppiness = 2.5f;
+                        params.windSpeed = 40.0f;
+                        params.foamIntensity = 2.5f;
+                        params.whitecapThreshold = 0.15f;
+                    }
+                    ImGui::TreePop();
+                }
             }
         }
         ImGui::End();
@@ -1621,6 +2066,21 @@ namespace Sea
             m_PendingCapture = true;
             RenderDocCapture::TriggerCapture();
             SEA_CORE_INFO("RenderDoc capture triggered");
+        }
+        
+        // F5 刷新着色器
+        static bool f5WasPressed = false;
+        if (Input::IsKeyDown(KeyCode::F5))
+        {
+            if (!f5WasPressed)
+            {
+                f5WasPressed = true;
+                RecompileAllShaders();
+            }
+        }
+        else
+        {
+            f5WasPressed = false;
         }
 
         // 场景切换快捷键
@@ -1898,15 +2358,31 @@ namespace Sea
                 bool bloomEnabled = m_BloomRenderer && m_BloomRenderer->GetSettings().Enabled;
                 if (bloomEnabled)
                 {
-                    // 执行 Bloom：从 HDR 场景提取高亮，模糊，输出到 LDR RT
-                    // BloomRenderer 会自己管理资源状态转换
+                    // 执行 Bloom：从 HDR 场景提取高亮并生成模糊结果
+                    // BloomRenderer 不再做合成，只生成 bloom 纹理
                     m_BloomRenderer->Render(
                         *cmdList,
                         m_HDRSceneSRV,                      // HDR 场景作为输入
-                        m_SceneRTVHeap->GetCPUHandle(0),   // 输出到 LDR RT (临时用于 Bloom 叠加)
-                        m_SceneRenderTarget->GetResource(),
+                        {},                                 // 输出 RTV 不再使用
+                        nullptr,                            // 输出资源不再使用
                         m_ViewportWidth, m_ViewportHeight
                     );
+                    
+                    // 更新 PostProcessSRVHeap 的 slot 1 指向 Bloom 结果
+                    if (auto* bloomResource = m_BloomRenderer->GetBloomResultResource())
+                    {
+                        D3D12_SHADER_RESOURCE_VIEW_DESC bloomSrvDesc = {};
+                        bloomSrvDesc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+                        bloomSrvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+                        bloomSrvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+                        bloomSrvDesc.Texture2D.MipLevels = 1;
+                        
+                        m_Device->GetDevice()->CreateShaderResourceView(
+                            bloomResource,
+                            &bloomSrvDesc,
+                            m_PostProcessSRVHeap->GetCPUHandle(1)
+                        );
+                    }
                     
                     // 更新 Tonemap 设置中的 Bloom 参数
                     auto& tonemapSettings = m_TonemapRenderer->GetSettings();
@@ -1923,7 +2399,6 @@ namespace Sea
                 }
                 
                 // 2.2 Tonemapping Pass: HDR -> LDR
-                // 设置描述符堆
                 ID3D12DescriptorHeap* heaps[] = { m_PostProcessSRVHeap->GetHeap() };
                 cmdList->GetCommandList()->SetDescriptorHeaps(1, heaps);
                 
@@ -2207,5 +2682,62 @@ namespace Sea
     void SampleApp::CreateResources()
     {
         // 预留用于创建GPU资源...
+    }
+
+    void SampleApp::RecompileAllShaders()
+    {
+        SEA_CORE_INFO("=== Recompiling all shaders ===");
+        
+        // 等待GPU完成所有工作以避免资源竞争
+        if (m_GraphicsQueue)
+        {
+            m_GraphicsQueue->WaitForIdle();
+        }
+        
+        bool success = true;
+        
+        // 重新编译 SimpleRenderer 着色器
+        if (m_Renderer)
+        {
+            if (!m_Renderer->RecompileShaders())
+            {
+                SEA_CORE_ERROR("Failed to recompile SimpleRenderer shaders");
+                success = false;
+            }
+        }
+        
+        // 重新编译 DeferredRenderer 着色器
+        if (m_DeferredRenderer)
+        {
+            if (!m_DeferredRenderer->RecompileShaders())
+            {
+                SEA_CORE_ERROR("Failed to recompile DeferredRenderer shaders");
+                success = false;
+            }
+        }
+        
+        // 重新编译 Ocean 着色器
+        if (m_Ocean)
+        {
+            if (!m_Ocean->RecompileShaders())
+            {
+                SEA_CORE_ERROR("Failed to recompile Ocean shaders");
+                success = false;
+            }
+        }
+        
+        // TODO: 添加其他渲染器的着色器重新编译
+        // - SkyRenderer
+        // - BloomRenderer
+        // - TonemapRenderer
+        
+        if (success)
+        {
+            SEA_CORE_INFO("=== All shaders recompiled successfully ===");
+        }
+        else
+        {
+            SEA_CORE_WARN("=== Some shaders failed to recompile ===");
+        }
     }
 }

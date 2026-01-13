@@ -406,6 +406,53 @@ namespace Sea
             mipHeight /= 2;
         }
 
+        // 创建 Upsample 专用 SRV 堆 - 每层需要 2 个连续的 SRV (lowRes + highRes)
+        DescriptorHeapDesc upsampleSrvHeapDesc;
+        upsampleSrvHeapDesc.type = DescriptorHeapType::CBV_SRV_UAV;
+        upsampleSrvHeapDesc.numDescriptors = MIP_COUNT * 2;  // 每层 2 个 SRV
+        upsampleSrvHeapDesc.shaderVisible = true;
+
+        m_UpsampleSRVHeap = MakeScope<DescriptorHeap>(m_Device, upsampleSrvHeapDesc);
+        if (!m_UpsampleSRVHeap->Initialize())
+        {
+            SEA_CORE_ERROR("BloomRenderer: Failed to create Upsample SRV heap");
+            return false;
+        }
+
+        // 为每一层创建 SRV 对 (lowRes, highRes)
+        for (u32 i = 0; i < MIP_COUNT; ++i)
+        {
+            u32 heapOffset = i * 2;
+            
+            D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+            srvDesc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+            srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+            srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+            srvDesc.Texture2D.MipLevels = 1;
+
+            // SRV 0: lowRes - 来自上一级 upsample 或最小级别的 downsample
+            ID3D12Resource* lowResResource;
+            if (i == MIP_COUNT - 1)
+            {
+                // 最小级别：使用同一个 downsample
+                lowResResource = m_DownsampleChain[i].Resource.Get();
+            }
+            else
+            {
+                // 其他级别：使用下一级的 upsample
+                lowResResource = m_UpsampleChain[i + 1].Resource.Get();
+            }
+            device->CreateShaderResourceView(lowResResource, &srvDesc, 
+                m_UpsampleSRVHeap->GetCPUHandle(heapOffset));
+
+            // SRV 1: highRes - 当前级别的 downsample
+            device->CreateShaderResourceView(m_DownsampleChain[i].Resource.Get(), &srvDesc, 
+                m_UpsampleSRVHeap->GetCPUHandle(heapOffset + 1));
+
+            // 保存 SRV 对的起始位置
+            m_UpsampleSRVPairs[i] = m_UpsampleSRVHeap->GetGPUHandle(heapOffset);
+        }
+
         SEA_CORE_INFO("BloomRenderer: Resources created (6 mip levels)");
         return true;
     }
@@ -424,8 +471,13 @@ namespace Sea
             mip.RTV = {};
             mip.SRV = {};
         }
+        for (auto& srvPair : m_UpsampleSRVPairs)
+        {
+            srvPair = {};
+        }
         m_RTVHeap.reset();
         m_SRVHeap.reset();
+        m_UpsampleSRVHeap.reset();
     }
 
     void BloomRenderer::Render(CommandList& cmdList, 
@@ -478,9 +530,13 @@ namespace Sea
         {
             UpsamplePass(cmdList, static_cast<u32>(i));
         }
+        
+        // 恢复描述符堆到默认 SRV 堆
+        ID3D12DescriptorHeap* defaultHeaps[] = { m_SRVHeap->GetHeap() };
+        d3dCmdList->SetDescriptorHeaps(1, defaultHeaps);
 
-        // Pass 12: Composite - 将 bloom 与场景合并
-        CompositePass(cmdList, inputSRV, outputRTV, outputResource, outputWidth, outputHeight);
+        // 注意：不再调用 CompositePass
+        // Bloom 结果通过 GetBloomResultSRV() 获取，在 Tonemapping 阶段合成
     }
 
     void BloomRenderer::ThresholdPass(CommandList& cmdList, D3D12_GPU_DESCRIPTOR_HANDLE inputSRV)
@@ -595,23 +651,20 @@ namespace Sea
         auto* d3dCmdList = cmdList.GetCommandList();
         auto& target = m_UpsampleChain[mipLevel];
         
-        // 源是下一级的 upsample 结果，或者最小 mip 的 downsample 结果
-        D3D12_GPU_DESCRIPTOR_HANDLE sourceSRV;
-        u32 sourceWidth, sourceHeight;
+        // 低分辨率源的尺寸（用于 texel size）
+        u32 lowResWidth, lowResHeight;
         
         if (mipLevel == MIP_COUNT - 1)
         {
-            // 最小级别：从 downsample chain 读取
-            sourceSRV = m_DownsampleChain[mipLevel].SRV;
-            sourceWidth = m_DownsampleChain[mipLevel].Width;
-            sourceHeight = m_DownsampleChain[mipLevel].Height;
+            // 最小级别：使用当前级别的 downsample 尺寸
+            lowResWidth = m_DownsampleChain[mipLevel].Width;
+            lowResHeight = m_DownsampleChain[mipLevel].Height;
         }
         else
         {
-            // 其他级别：从上一级 upsample 结果读取
-            sourceSRV = m_UpsampleChain[mipLevel + 1].SRV;
-            sourceWidth = m_UpsampleChain[mipLevel + 1].Width;
-            sourceHeight = m_UpsampleChain[mipLevel + 1].Height;
+            // 其他级别：使用上一级 upsample 的尺寸
+            lowResWidth = m_UpsampleChain[mipLevel + 1].Width;
+            lowResHeight = m_UpsampleChain[mipLevel + 1].Height;
         }
 
         // 转换目标到 RenderTarget
@@ -626,10 +679,10 @@ namespace Sea
         // 设置渲染目标
         d3dCmdList->OMSetRenderTargets(1, &target.RTV, FALSE, nullptr);
 
-        // 更新 texel size (使用源纹理尺寸)
+        // 更新 texel size (使用低分辨率源纹理尺寸)
         BloomConstants constants = {};
-        constants.TexelSizeX = 1.0f / static_cast<float>(sourceWidth);
-        constants.TexelSizeY = 1.0f / static_cast<float>(sourceHeight);
+        constants.TexelSizeX = 1.0f / static_cast<float>(lowResWidth);
+        constants.TexelSizeY = 1.0f / static_cast<float>(lowResHeight);
         constants.BloomThreshold = m_Settings.Threshold;
         constants.BloomIntensity = m_Settings.Intensity;
         constants.BloomRadius = m_Settings.Radius;
@@ -642,6 +695,8 @@ namespace Sea
         constants.Bloom4Weight = m_Settings.Mip4Weight;
         constants.Bloom5Weight = m_Settings.Mip5Weight;
         constants.Bloom6Weight = m_Settings.Mip6Weight;
+        constants.CurrentMipLevel = static_cast<float>(mipLevel);
+        constants.IsLastMip = (mipLevel == MIP_COUNT - 1) ? 1.0f : 0.0f;
         m_ConstantBuffer->Update(&constants, sizeof(BloomConstants));
 
         // 设置视口
@@ -650,9 +705,15 @@ namespace Sea
         d3dCmdList->RSSetViewports(1, &viewport);
         d3dCmdList->RSSetScissorRects(1, &scissor);
 
+        // 使用 Upsample 专用 SRV 堆和 SRV 对
+        ID3D12DescriptorHeap* heaps[] = { m_UpsampleSRVHeap->GetHeap() };
+        d3dCmdList->SetDescriptorHeaps(1, heaps);
+        
         // 绘制
         d3dCmdList->SetPipelineState(m_UpsamplePSO->GetPipelineState());
-        d3dCmdList->SetGraphicsRootDescriptorTable(1, sourceSRV);
+        d3dCmdList->SetGraphicsRootConstantBufferView(0, m_ConstantBuffer->GetGPUAddress());
+        // 使用预先创建的 SRV 对 (t0=lowRes, t1=highRes)
+        d3dCmdList->SetGraphicsRootDescriptorTable(1, m_UpsampleSRVPairs[mipLevel]);
         d3dCmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         d3dCmdList->DrawInstanced(3, 1, 0, 0);
 

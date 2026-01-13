@@ -49,9 +49,32 @@ namespace Sea
         m_GBufferObjectConstantBuffer.reset();
         m_LightingConstantBuffer.reset();
         m_GBufferPSO.reset();
+        m_GBufferWireframePSO.reset();
         m_LightingPSO.reset();
         m_GBufferRootSignature.reset();
         m_LightingRootSignature.reset();
+    }
+
+    bool DeferredRenderer::RecompileShaders()
+    {
+        SEA_CORE_INFO("Recompiling DeferredRenderer shaders...");
+        
+        // 释放旧的 PSO（保留 Root Signature）
+        m_GBufferPSO.reset();
+        m_GBufferWireframePSO.reset();
+        m_LightingPSO.reset();
+        m_GBufferRootSignature.reset();
+        m_LightingRootSignature.reset();
+        
+        // 重新创建 Pipelines
+        if (!CreatePipelines())
+        {
+            SEA_CORE_ERROR("Failed to recompile DeferredRenderer shaders");
+            return false;
+        }
+        
+        SEA_CORE_INFO("DeferredRenderer shaders recompiled successfully");
+        return true;
     }
 
     void DeferredRenderer::Resize(u32 width, u32 height)
@@ -217,6 +240,15 @@ namespace Sea
         {
             SEA_CORE_ERROR("DeferredRenderer: Failed to create G-Buffer PSO");
             return false;
+        }
+
+        // ========== G-Buffer Wireframe PSO ==========
+        GraphicsPipelineDesc wireframePsoDesc = gbufferPsoDesc;
+        wireframePsoDesc.fillMode = FillMode::Wireframe;
+        m_GBufferWireframePSO = PipelineState::CreateGraphics(m_Device, wireframePsoDesc);
+        if (!m_GBufferWireframePSO)
+        {
+            SEA_CORE_WARN("DeferredRenderer: Failed to create G-Buffer Wireframe PSO");
         }
 
         // ========== Compile Lighting Shaders ==========
@@ -468,8 +500,15 @@ namespace Sea
         d3dCmdList->RSSetViewports(1, &viewport);
         d3dCmdList->RSSetScissorRects(1, &scissor);
 
-        // 设置 PSO 和根签名
-        d3dCmdList->SetPipelineState(m_GBufferPSO->GetPipelineState());
+        // 根据视图模式选择 PSO
+        if (m_ViewMode == 1 && m_GBufferWireframePSO)
+        {
+            d3dCmdList->SetPipelineState(m_GBufferWireframePSO->GetPipelineState());
+        }
+        else
+        {
+            d3dCmdList->SetPipelineState(m_GBufferPSO->GetPipelineState());
+        }
         d3dCmdList->SetGraphicsRootSignature(m_GBufferRootSignature->GetRootSignature());
 
         // 更新帧常量

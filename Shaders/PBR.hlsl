@@ -56,6 +56,15 @@ struct VSInput
     float4 Color : COLOR0;
 };
 
+// 简化版顶点输入 (不需要切线)
+struct VSInputSimple
+{
+    float3 Position : POSITION;
+    float3 Normal : NORMAL;
+    float2 TexCoord : TEXCOORD0;
+    float4 Color : COLOR0;
+};
+
 // 像素着色器输入
 struct PSInput
 {
@@ -180,7 +189,7 @@ float4 PSMain(PSInput input) : SV_TARGET
 }
 
 // 简化版顶点着色器 (没有切线输入时使用)
-PSInput VSMainSimple(VSInput input)
+PSInput VSMainSimple(VSInputSimple input)
 {
     PSInput output;
     

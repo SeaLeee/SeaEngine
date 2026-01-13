@@ -46,7 +46,9 @@ namespace Sea
         float Bloom4Weight;
         float Bloom5Weight;
         float Bloom6Weight;
-        float Padding[2];
+        
+        float CurrentMipLevel;  // 当前 mip 级别 (用于 upsample shader)
+        float IsLastMip;        // 是否是最小级别
     };
 
     class BloomRenderer : public NonCopyable
@@ -74,6 +76,13 @@ namespace Sea
         BloomSettings& GetSettings() { return m_Settings; }
         const BloomSettings& GetSettings() const { return m_Settings; }
         void SetSettings(const BloomSettings& settings) { m_Settings = settings; }
+        
+        // 获取最终 Bloom 结果的 SRV（用于 Tonemapping 合成）
+        D3D12_GPU_DESCRIPTOR_HANDLE GetBloomResultSRV() const { return m_UpsampleChain[0].SRV; }
+        DescriptorHeap* GetSRVHeap() { return m_SRVHeap.get(); }
+        
+        // 获取最终 Bloom 结果的资源（用于外部创建 SRV）
+        ID3D12Resource* GetBloomResultResource() const { return m_UpsampleChain[0].Resource.Get(); }
 
     private:
         bool CreatePipelines();
@@ -121,6 +130,8 @@ namespace Sea
         // 描述符堆
         Scope<DescriptorHeap> m_RTVHeap;
         Scope<DescriptorHeap> m_SRVHeap;
+        Scope<DescriptorHeap> m_UpsampleSRVHeap;  // 用于 Upsample 的双纹理 SRV 对
+        std::array<D3D12_GPU_DESCRIPTOR_HANDLE, MIP_COUNT> m_UpsampleSRVPairs;  // 每层的 SRV 对起始位置
         
         // 采样器
         ComPtr<ID3D12Resource> m_SamplerResource;

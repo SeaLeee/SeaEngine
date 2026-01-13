@@ -37,19 +37,31 @@ namespace Sea
 
     ShaderCompileResult ShaderCompiler::Compile(const ShaderCompileDesc& desc)
     {
-        if (desc.model >= ShaderModel::SM_6_0 && s_DxcCompiler)
-            return CompileDXC(desc);
-        return CompileFXC(desc);
+        // 创建一个可修改的副本，应用全局调试设置
+        ShaderCompileDesc modifiedDesc = desc;
+        if (s_GlobalDebugEnabled)
+        {
+            modifiedDesc.debug = true;
+            modifiedDesc.optimize = false;  // 调试模式下禁用优化
+        }
+        
+        if (modifiedDesc.model >= ShaderModel::SM_6_0 && s_DxcCompiler)
+            return CompileDXC(modifiedDesc);
+        return CompileFXC(modifiedDesc);
     }
 
     ShaderCompileResult ShaderCompiler::CompileFromSource(const std::string& source, const ShaderCompileDesc& desc)
     {
         ShaderCompileResult result;
         std::string target = GetTargetProfile(desc.stage, desc.model);
+        
+        // 应用全局调试设置
+        bool effectiveDebug = desc.debug || s_GlobalDebugEnabled;
+        bool effectiveOptimize = desc.optimize && !s_GlobalDebugEnabled;
 
         UINT flags = 0;
-        if (desc.debug) flags |= D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION;
-        if (desc.optimize) flags |= D3DCOMPILE_OPTIMIZATION_LEVEL3;
+        if (effectiveDebug) flags |= D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION;
+        if (effectiveOptimize) flags |= D3DCOMPILE_OPTIMIZATION_LEVEL3;
 
         ComPtr<ID3DBlob> shaderBlob, errorBlob;
         HRESULT hr = D3DCompile(source.data(), source.size(), nullptr, nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE,
@@ -112,8 +124,13 @@ namespace Sea
         args.push_back(L"-I"); args.push_back(shaderDir.c_str());
         args.push_back(L"-I"); args.push_back(shadersRoot.c_str());
         
-        if (desc.debug) { args.push_back(L"-Zi"); args.push_back(L"-Od"); }
-        if (desc.optimize) args.push_back(L"-O3");
+        if (desc.debug) 
+        { 
+            args.push_back(L"-Zi");           // 生成调试信息
+            args.push_back(L"-Od");           // 禁用优化
+            args.push_back(L"-Qembed_debug"); // 嵌入调试信息到 shader (RenderDoc 需要)
+        }
+        if (desc.optimize && !desc.debug) args.push_back(L"-O3");
 
         DxcBuffer sourceBuffer = { source.c_str(), source.size(), CP_UTF8 };
         ComPtr<IDxcResult> results;
