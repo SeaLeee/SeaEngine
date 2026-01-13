@@ -113,7 +113,7 @@ namespace Sea
         skyPsoDesc.vertexShader = vsResult.bytecode;
         skyPsoDesc.pixelShader = skyPsResult.bytecode;
         skyPsoDesc.inputLayout = emptyLayout;
-        skyPsoDesc.rtvFormats = { Format::R8G8B8A8_UNORM };
+        skyPsoDesc.rtvFormats = { Format::R16G16B16A16_FLOAT };  // HDR output for post-processing
         skyPsoDesc.dsvFormat = Format::D32_FLOAT;
         skyPsoDesc.depthEnable = true;
         skyPsoDesc.depthWrite = false;

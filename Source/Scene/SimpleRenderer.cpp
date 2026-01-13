@@ -120,7 +120,7 @@ namespace Sea
         basicDesc.vertexShader = vsResult.bytecode;
         basicDesc.pixelShader = psResult.bytecode;
         basicDesc.inputLayout = inputLayout;
-        basicDesc.rtvFormats = { Format::R8G8B8A8_UNORM };
+        basicDesc.rtvFormats = { Format::R16G16B16A16_FLOAT };  // HDR format for post-processing
         basicDesc.dsvFormat = Format::D32_FLOAT;
         basicDesc.depthEnable = true;
         basicDesc.depthWrite = true;
@@ -161,7 +161,7 @@ namespace Sea
         gridDesc.vertexShader = gridVsResult.bytecode;
         gridDesc.pixelShader = gridPsResult.bytecode;
         gridDesc.inputLayout = inputLayout;
-        gridDesc.rtvFormats = { Format::R8G8B8A8_UNORM };
+        gridDesc.rtvFormats = { Format::R16G16B16A16_FLOAT };  // HDR format for post-processing
         gridDesc.dsvFormat = Format::D32_FLOAT;
         gridDesc.depthEnable = true;
         gridDesc.depthWrite = false;  // Grid 不写深度
@@ -205,7 +205,7 @@ namespace Sea
             pbrDesc.vertexShader = pbrVsResult.bytecode;
             pbrDesc.pixelShader = pbrPsResult.bytecode;
             pbrDesc.inputLayout = inputLayout;
-            pbrDesc.rtvFormats = { Format::R8G8B8A8_UNORM };
+            pbrDesc.rtvFormats = { Format::R16G16B16A16_FLOAT };  // HDR format for post-processing
             pbrDesc.dsvFormat = Format::D32_FLOAT;
             pbrDesc.depthEnable = true;
             pbrDesc.depthWrite = true;

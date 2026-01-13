@@ -252,7 +252,7 @@ namespace Sea
         lightingPsoDesc.vertexShader = lightingVsResult.bytecode;
         lightingPsoDesc.pixelShader = lightingPsResult.bytecode;
         lightingPsoDesc.inputLayout = {};  // Fullscreen triangle
-        lightingPsoDesc.rtvFormats = { Format::R8G8B8A8_UNORM };
+        lightingPsoDesc.rtvFormats = { Format::R16G16B16A16_FLOAT };  // HDR output for post-processing
         lightingPsoDesc.dsvFormat = Format::Unknown;
         lightingPsoDesc.depthEnable = false;
         lightingPsoDesc.depthWrite = false;

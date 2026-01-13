@@ -3,6 +3,7 @@
 #include "Core/Log.h"
 #include "Graphics/RenderDocCapture.h"
 #include "Scene/SceneManager.h"
+#include "Scene/TonemapRenderer.h"
 #include <imgui_internal.h>
 #include <filesystem>
 
@@ -80,11 +81,14 @@ namespace Sea
         
         // 释放旧资源
         m_SceneRenderTarget.reset();
+        m_HDRRenderTarget.reset();
         m_SceneRTVHeap.reset();
+        m_HDRRTVHeap.reset();
+        m_PostProcessSRVHeap.reset();
         m_DepthBuffer.reset();
         m_DSVHeap.reset();
         
-        // 创建 RTV 堆
+        // ========== 1. 创建 LDR 场景渲染目标（用于 ImGui 显示） ==========
         D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc = {};
         rtvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
         rtvHeapDesc.NumDescriptors = 1;
@@ -94,30 +98,28 @@ namespace Sea
         if (!m_SceneRTVHeap->Initialize())
             return false;
         
-        // 创建场景渲染目标纹理
-        TextureDesc rtDesc;
-        rtDesc.width = width;
-        rtDesc.height = height;
-        rtDesc.format = Format::R8G8B8A8_UNORM;
-        rtDesc.usage = TextureUsage::RenderTarget | TextureUsage::ShaderResource;
-        rtDesc.name = "SceneRenderTarget";
+        TextureDesc ldrRtDesc;
+        ldrRtDesc.width = width;
+        ldrRtDesc.height = height;
+        ldrRtDesc.format = Format::R8G8B8A8_UNORM;
+        ldrRtDesc.usage = TextureUsage::RenderTarget | TextureUsage::ShaderResource;
+        ldrRtDesc.name = "SceneRenderTarget_LDR";
         
-        m_SceneRenderTarget = MakeScope<Texture>(*m_Device, rtDesc);
+        m_SceneRenderTarget = MakeScope<Texture>(*m_Device, ldrRtDesc);
         if (!m_SceneRenderTarget->Initialize())
             return false;
         
-        // 创建 RTV
-        D3D12_RENDER_TARGET_VIEW_DESC rtvDesc = {};
-        rtvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-        rtvDesc.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
+        D3D12_RENDER_TARGET_VIEW_DESC ldrRtvDesc = {};
+        ldrRtvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        ldrRtvDesc.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
         
         m_Device->GetDevice()->CreateRenderTargetView(
             m_SceneRenderTarget->GetResource(),
-            &rtvDesc,
+            &ldrRtvDesc,
             m_SceneRTVHeap->GetCPUHandle(0)
         );
         
-        // 使用 ImGuiRenderer 注册纹理（在 ImGui 的 SRV 堆中创建 SRV）
+        // 注册 LDR 纹理到 ImGui
         if (m_ImGuiRenderer)
         {
             m_SceneTextureHandle = m_ImGuiRenderer->RegisterTexture(
@@ -126,7 +128,74 @@ namespace Sea
             );
         }
         
-        // 重建深度缓冲（匹配新尺寸）
+        // ========== 2. 创建 HDR 场景渲染目标（用于后处理） ==========
+        if (m_UseHDRPipeline)
+        {
+            D3D12_DESCRIPTOR_HEAP_DESC hdrRtvHeapDesc = {};
+            hdrRtvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
+            hdrRtvHeapDesc.NumDescriptors = 1;
+            hdrRtvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+            
+            m_HDRRTVHeap = MakeScope<DescriptorHeap>(*m_Device, hdrRtvHeapDesc);
+            if (!m_HDRRTVHeap->Initialize())
+                return false;
+            
+            TextureDesc hdrRtDesc;
+            hdrRtDesc.width = width;
+            hdrRtDesc.height = height;
+            hdrRtDesc.format = Format::R16G16B16A16_FLOAT;  // HDR 格式
+            hdrRtDesc.usage = TextureUsage::RenderTarget | TextureUsage::ShaderResource;
+            hdrRtDesc.name = "SceneRenderTarget_HDR";
+            
+            m_HDRRenderTarget = MakeScope<Texture>(*m_Device, hdrRtDesc);
+            if (!m_HDRRenderTarget->Initialize())
+                return false;
+            
+            D3D12_RENDER_TARGET_VIEW_DESC hdrRtvDesc = {};
+            hdrRtvDesc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+            hdrRtvDesc.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
+            
+            m_Device->GetDevice()->CreateRenderTargetView(
+                m_HDRRenderTarget->GetResource(),
+                &hdrRtvDesc,
+                m_HDRRTVHeap->GetCPUHandle(0)
+            );
+            
+            // ========== 3. 创建后处理 SRV 描述符堆 ==========
+            DescriptorHeapDesc ppSrvHeapDesc;
+            ppSrvHeapDesc.type = DescriptorHeapType::CBV_SRV_UAV;
+            ppSrvHeapDesc.numDescriptors = 4;  // HDR Scene + Bloom + 预留
+            ppSrvHeapDesc.shaderVisible = true;
+            
+            m_PostProcessSRVHeap = MakeScope<DescriptorHeap>(*m_Device, ppSrvHeapDesc);
+            if (!m_PostProcessSRVHeap->Initialize())
+                return false;
+            
+            // 创建 HDR 场景 SRV (slot 0)
+            D3D12_SHADER_RESOURCE_VIEW_DESC hdrSrvDesc = {};
+            hdrSrvDesc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+            hdrSrvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+            hdrSrvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+            hdrSrvDesc.Texture2D.MipLevels = 1;
+            
+            m_Device->GetDevice()->CreateShaderResourceView(
+                m_HDRRenderTarget->GetResource(),
+                &hdrSrvDesc,
+                m_PostProcessSRVHeap->GetCPUHandle(0)
+            );
+            m_HDRSceneSRV = m_PostProcessSRVHeap->GetGPUHandle(0);
+            
+            // Bloom SRV 将由 BloomRenderer 填充 (slot 1)
+            // 暂时创建一个占位 SRV
+            m_Device->GetDevice()->CreateShaderResourceView(
+                m_HDRRenderTarget->GetResource(),  // 临时使用 HDR RT
+                &hdrSrvDesc,
+                m_PostProcessSRVHeap->GetCPUHandle(1)
+            );
+            m_BloomResultSRV = m_PostProcessSRVHeap->GetGPUHandle(1);
+        }
+        
+        // ========== 4. 重建深度缓冲 ==========
         D3D12_DESCRIPTOR_HEAP_DESC dsvHeapDesc = {};
         dsvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
         dsvHeapDesc.NumDescriptors = 1;
@@ -171,7 +240,13 @@ namespace Sea
             m_DeferredRenderer->Resize(width, height);
         }
         
-        SEA_CORE_INFO("Scene render target created: {}x{}", width, height);
+        // 更新 Bloom 渲染器资源尺寸
+        if (m_BloomRenderer)
+        {
+            m_BloomRenderer->Resize(width, height);
+        }
+        
+        SEA_CORE_INFO("Scene render target created: {}x{} (HDR: {})", width, height, m_UseHDRPipeline);
         return true;
     }
 
@@ -315,6 +390,14 @@ namespace Sea
         {
             SEA_CORE_WARN("Failed to initialize BloomRenderer - Bloom will not be available");
             m_BloomRenderer.reset();
+        }
+        
+        // 创建 Tonemap 渲染器
+        m_TonemapRenderer = MakeScope<TonemapRenderer>(*m_Device);
+        if (!m_TonemapRenderer->Initialize())
+        {
+            SEA_CORE_WARN("Failed to initialize TonemapRenderer - Tonemapping will not be available");
+            m_TonemapRenderer.reset();
         }
         
         // 创建 Deferred 渲染器
@@ -1467,28 +1550,50 @@ namespace Sea
                 
                 ImGui::Separator();
                 
-                // Tonemapping设置
-                static bool tonemapEnabled = true;
-                static int tonemapOperator = 0;
-                const char* tonemapOps[] = { "ACES", "Reinhard", "Uncharted 2", "None" };
-                
-                // Color Grading设置
-                static bool colorGradingEnabled = false;
-                static float exposure = 1.0f;
-                static float contrast = 1.0f;
-                static float saturation = 1.0f;
-                
-                // Tonemapping UI
-                ImGui::Checkbox("Tone Mapping", &tonemapEnabled);
-                if (tonemapEnabled)
+                // HDR 管线开关
+                if (ImGui::Checkbox("HDR Pipeline", &m_UseHDRPipeline))
                 {
-                    ImGui::Indent();
-                    ImGui::Combo("Operator", &tonemapOperator, tonemapOps, 4);
-                    ImGui::SliderFloat("Exposure", &exposure, 0.1f, 5.0f);
-                    ImGui::Unindent();
+                    // 重建渲染目标以启用/禁用 HDR
+                    CreateSceneRenderTarget(m_ViewportWidth, m_ViewportHeight);
+                }
+                ImGui::SameLine();
+                ImGui::TextDisabled("(?)");
+                if (ImGui::IsItemHovered())
+                {
+                    ImGui::BeginTooltip();
+                    ImGui::Text("Enable HDR rendering for Bloom and Tonemapping effects");
+                    ImGui::EndTooltip();
                 }
                 
                 ImGui::Separator();
+                
+                // Tonemapping设置
+                if (m_TonemapRenderer)
+                {
+                    auto& tonemapSettings = m_TonemapRenderer->GetSettings();
+                    const char* tonemapOps[] = { "ACES", "Reinhard", "Uncharted 2", "None" };
+                    
+                    ImGui::Checkbox("Tone Mapping", &tonemapSettings.Enabled);
+                    if (tonemapSettings.Enabled)
+                    {
+                        ImGui::Indent();
+                        ImGui::Combo("Operator", &tonemapSettings.Operator, tonemapOps, 4);
+                        ImGui::SliderFloat("Exposure", &tonemapSettings.Exposure, 0.1f, 5.0f, "%.2f");
+                        ImGui::SliderFloat("Gamma", &tonemapSettings.Gamma, 1.0f, 3.0f, "%.2f");
+                        ImGui::Unindent();
+                    }
+                }
+                else
+                {
+                    ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.5f, 1.0f), "TonemapRenderer not available");
+                }
+                
+                ImGui::Separator();
+                
+                // Color Grading设置 (TODO: 未来实现)
+                static bool colorGradingEnabled = false;
+                static float contrast = 1.0f;
+                static float saturation = 1.0f;
                 
                 // Color Grading UI
                 ImGui::Checkbox("Color Grading", &colorGradingEnabled);
@@ -1497,6 +1602,7 @@ namespace Sea
                     ImGui::Indent();
                     ImGui::SliderFloat("Contrast", &contrast, 0.5f, 2.0f);
                     ImGui::SliderFloat("Saturation", &saturation, 0.0f, 2.0f);
+                    ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.5f, 1.0f), "(Not implemented yet)");
                     ImGui::Unindent();
                 }
             }
@@ -1639,12 +1745,24 @@ namespace Sea
         // 重置命令列表
         cmdList->Reset();
 
-        // ========== 1. 渲染 3D 场景到离屏纹理 ==========
+        // ========== 1. 渲染 3D 场景到 HDR RT ==========
+        // 注意：所有渲染器的 PSO 使用 R16G16B16A16_FLOAT 格式，所以必须渲染到 HDR RT
         if (m_SceneRenderTarget && m_ViewportWidth > 0 && m_ViewportHeight > 0)
         {
+            // 始终使用 HDR RT 进行场景渲染（因为 PSO 格式要求）
+            // 如果 HDR RT 不存在，降级到 LDR（可能会有格式不匹配问题）
+            bool hasHDRTarget = m_HDRRenderTarget != nullptr;
+            
+            ID3D12Resource* sceneRenderTargetResource = hasHDRTarget 
+                ? m_HDRRenderTarget->GetResource() 
+                : m_SceneRenderTarget->GetResource();
+            D3D12_CPU_DESCRIPTOR_HANDLE sceneRtv = hasHDRTarget 
+                ? m_HDRRTVHeap->GetCPUHandle(0) 
+                : m_SceneRTVHeap->GetCPUHandle(0);
+            
             // 转换场景渲染目标到 RenderTarget 状态
             cmdList->TransitionBarrier(
-                m_SceneRenderTarget->GetResource(),
+                sceneRenderTargetResource,
                 ResourceState::Common,
                 ResourceState::RenderTarget
             );
@@ -1671,7 +1789,6 @@ namespace Sea
                 sceneClearColor[2] = 0.15f;
                 sceneClearColor[3] = 1.0f;
             }
-            D3D12_CPU_DESCRIPTOR_HANDLE sceneRtv = m_SceneRTVHeap->GetCPUHandle(0);
             cmdList->GetCommandList()->ClearRenderTargetView(sceneRtv, sceneClearColor, 0, nullptr);
             
             D3D12_CPU_DESCRIPTOR_HANDLE dsv = m_DSVHeap->GetCPUHandle(0);
@@ -1704,25 +1821,20 @@ namespace Sea
                 m_DeferredRenderer->EndGBufferPass(*cmdList);
                 
                 // 2. Lighting Pass - 输出到场景渲染目标
-                D3D12_CPU_DESCRIPTOR_HANDLE deferredSceneRtv = m_SceneRTVHeap->GetCPUHandle(0);
-                m_DeferredRenderer->LightingPass(*cmdList, deferredSceneRtv, 
-                    m_SceneRenderTarget->GetResource(), m_ViewportWidth, m_ViewportHeight);
-                
-                // 获取深度句柄用于后续渲染
-                D3D12_CPU_DESCRIPTOR_HANDLE deferredDsv = m_DSVHeap->GetCPUHandle(0);
+                m_DeferredRenderer->LightingPass(*cmdList, sceneRtv, 
+                    sceneRenderTargetResource, m_ViewportWidth, m_ViewportHeight);
                 
                 // 3. 渲染天空（在 deferred 之后叠加，使用深度测试）
                 if (m_SkyRenderer && m_SkyRenderer->GetSettings().EnableSky)
                 {
-                    // 重新设置渲染目标和深度
-                    cmdList->GetCommandList()->OMSetRenderTargets(1, &deferredSceneRtv, FALSE, &deferredDsv);
+                    cmdList->GetCommandList()->OMSetRenderTargets(1, &sceneRtv, FALSE, &dsv);
                     m_SkyRenderer->Render(*cmdList, *m_Camera);
                 }
                 
                 // 4. 渲染网格（前向渲染叠加）
                 if (m_GridMesh)
                 {
-                    cmdList->GetCommandList()->OMSetRenderTargets(1, &deferredSceneRtv, FALSE, &deferredDsv);
+                    cmdList->GetCommandList()->OMSetRenderTargets(1, &sceneRtv, FALSE, &dsv);
                     m_Renderer->BeginFrame(*m_Camera, m_TotalTime);
                     m_Renderer->RenderGrid(*cmdList, *m_GridMesh);
                 }
@@ -1763,9 +1875,9 @@ namespace Sea
                 }
             }
 
-            // 转换场景渲染目标到 ShaderResource 状态（供 Bloom 和 ImGui 使用）
+            // 转换场景渲染目标到 ShaderResource 状态
             cmdList->TransitionBarrier(
-                m_SceneRenderTarget->GetResource(),
+                sceneRenderTargetResource,
                 ResourceState::RenderTarget,
                 ResourceState::Common  // Common 可以作为 SRV 读取
             );
@@ -1776,17 +1888,113 @@ namespace Sea
             );
             cmdList->FlushBarriers();
             
-            // ========== Bloom Pass (如果启用) ==========
-            if (m_BloomRenderer && m_BloomRenderer->GetSettings().Enabled)
+            // ========== 2. 后处理流程（Bloom + Tonemapping） ==========
+            // 启用后处理条件：有 HDR RT 且 Tonemapping 启用
+            bool runPostProcess = hasHDRTarget && m_TonemapRenderer && m_TonemapRenderer->GetSettings().Enabled;
+            
+            if (runPostProcess)
             {
-                // 注意：Bloom 需要场景的 SRV 句柄。当前使用 ImGui 注册的 SRV。
-                // 实际应用中应该有独立的 SRV 堆管理。
-                m_BloomRenderer->Resize(m_ViewportWidth, m_ViewportHeight);
-                // TODO: 集成 Bloom - 需要额外的 SRV 设置
+                // 2.1 Bloom Pass
+                bool bloomEnabled = m_BloomRenderer && m_BloomRenderer->GetSettings().Enabled;
+                if (bloomEnabled)
+                {
+                    // 执行 Bloom：从 HDR 场景提取高亮，模糊，输出到 LDR RT
+                    // BloomRenderer 会自己管理资源状态转换
+                    m_BloomRenderer->Render(
+                        *cmdList,
+                        m_HDRSceneSRV,                      // HDR 场景作为输入
+                        m_SceneRTVHeap->GetCPUHandle(0),   // 输出到 LDR RT (临时用于 Bloom 叠加)
+                        m_SceneRenderTarget->GetResource(),
+                        m_ViewportWidth, m_ViewportHeight
+                    );
+                    
+                    // 更新 Tonemap 设置中的 Bloom 参数
+                    auto& tonemapSettings = m_TonemapRenderer->GetSettings();
+                    tonemapSettings.BloomEnabled = true;
+                    tonemapSettings.BloomIntensity = m_BloomRenderer->GetSettings().Intensity;
+                    tonemapSettings.BloomTintR = m_BloomRenderer->GetSettings().TintR;
+                    tonemapSettings.BloomTintG = m_BloomRenderer->GetSettings().TintG;
+                    tonemapSettings.BloomTintB = m_BloomRenderer->GetSettings().TintB;
+                }
+                else
+                {
+                    // Bloom 禁用时
+                    m_TonemapRenderer->GetSettings().BloomEnabled = false;
+                }
+                
+                // 2.2 Tonemapping Pass: HDR -> LDR
+                // 设置描述符堆
+                ID3D12DescriptorHeap* heaps[] = { m_PostProcessSRVHeap->GetHeap() };
+                cmdList->GetCommandList()->SetDescriptorHeaps(1, heaps);
+                
+                // 执行 Tonemapping
+                m_TonemapRenderer->Render(
+                    *cmdList,
+                    m_HDRSceneSRV,                      // HDR 场景 SRV
+                    m_BloomResultSRV,                   // Bloom 结果 SRV (如果有)
+                    m_SceneRTVHeap->GetCPUHandle(0),   // 输出到 LDR RT
+                    m_SceneRenderTarget->GetResource(),
+                    m_ViewportWidth, m_ViewportHeight
+                );
+            }
+            else if (hasHDRTarget)
+            {
+                // HDR 管线启用但后处理禁用 - 直接复制 HDR 到 LDR（会丢失 HDR 信息）
+                // 这里简单处理：通过 copy resource 复制
+                cmdList->TransitionBarrier(
+                    m_SceneRenderTarget->GetResource(),
+                    ResourceState::Common,
+                    ResourceState::CopyDest
+                );
+                cmdList->TransitionBarrier(
+                    m_HDRRenderTarget->GetResource(),
+                    ResourceState::Common,
+                    ResourceState::CopySource
+                );
+                cmdList->FlushBarriers();
+                
+                // 注意：由于格式不同，不能直接 copy。使用默认 Tonemap 处理
+                // 这里降级到不进行后处理，显示 HDR 信息时可能会过曝
+                // 实际应用中应该总是使用后处理
+                
+                cmdList->TransitionBarrier(
+                    m_SceneRenderTarget->GetResource(),
+                    ResourceState::CopyDest,
+                    ResourceState::Common
+                );
+                cmdList->TransitionBarrier(
+                    m_HDRRenderTarget->GetResource(),
+                    ResourceState::CopySource,
+                    ResourceState::Common
+                );
+                cmdList->FlushBarriers();
+                
+                // 强制启用 Tonemapping 来处理 HDR -> LDR 转换
+                if (m_TonemapRenderer)
+                {
+                    ID3D12DescriptorHeap* heaps[] = { m_PostProcessSRVHeap->GetHeap() };
+                    cmdList->GetCommandList()->SetDescriptorHeaps(1, heaps);
+                    
+                    auto& settings = m_TonemapRenderer->GetSettings();
+                    bool originalEnabled = settings.Enabled;
+                    settings.Enabled = true;
+                    settings.BloomEnabled = false;
+                    
+                    m_TonemapRenderer->Render(
+                        *cmdList,
+                        m_HDRSceneSRV,
+                        m_BloomResultSRV,
+                        m_SceneRTVHeap->GetCPUHandle(0),
+                        m_SceneRenderTarget->GetResource(),
+                        m_ViewportWidth, m_ViewportHeight
+                    );
+                    
+                    settings.Enabled = originalEnabled;
+                }
             }
         }
 
-        // ========== 2. 渲染 ImGui 到 SwapChain ==========
+        // ========== 3. 渲染 ImGui 到 SwapChain ==========
         cmdList->TransitionBarrier(
             m_SwapChain->GetCurrentBackBuffer(),
             ResourceState::Present,

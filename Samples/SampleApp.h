@@ -11,6 +11,7 @@
 #include "Scene/Ocean.h"
 #include "Scene/SkyRenderer.h"
 #include "Scene/BloomRenderer.h"
+#include "Scene/TonemapRenderer.h"
 #include "Scene/DeferredRenderer.h"
 
 namespace Sea
@@ -59,6 +60,7 @@ namespace Sea
         Scope<Ocean> m_Ocean;
         Scope<SkyRenderer> m_SkyRenderer;
         Scope<BloomRenderer> m_BloomRenderer;
+        Scope<TonemapRenderer> m_TonemapRenderer;
         Scope<DeferredRenderer> m_DeferredRenderer;
         RenderPipeline m_CurrentPipeline = RenderPipeline::Forward;
         bool m_OceanSceneActive = false;
@@ -81,11 +83,17 @@ namespace Sea
         Scope<DescriptorHeap> m_DSVHeap;
         
         // 离屏渲染目标（用于Viewport显示）
-        Scope<Texture> m_SceneRenderTarget;
-        Scope<DescriptorHeap> m_SceneRTVHeap;
+        Scope<Texture> m_SceneRenderTarget;          // LDR 最终输出（用于 ImGui 显示）
+        Scope<Texture> m_HDRRenderTarget;            // HDR 场景渲染目标
+        Scope<DescriptorHeap> m_SceneRTVHeap;        // LDR RTV 堆
+        Scope<DescriptorHeap> m_HDRRTVHeap;          // HDR RTV 堆
+        Scope<DescriptorHeap> m_PostProcessSRVHeap; // 后处理 SRV 堆
         D3D12_GPU_DESCRIPTOR_HANDLE m_SceneTextureHandle = { 0 };  // ImGui 使用的纹理句柄
+        D3D12_GPU_DESCRIPTOR_HANDLE m_HDRSceneSRV = { 0 };         // HDR 场景 SRV
+        D3D12_GPU_DESCRIPTOR_HANDLE m_BloomResultSRV = { 0 };      // Bloom 结果 SRV
         u32 m_ViewportWidth = 1280;
         u32 m_ViewportHeight = 720;
+        bool m_UseHDRPipeline = true;  // 是否使用 HDR 后处理管线
 
         // 相机控制
         bool m_CameraControl = false;

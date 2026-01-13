@@ -15,7 +15,9 @@ cbuffer TonemapConstants : register(b1)
     int g_TonemapOperator;  // 0: ACES, 1: Reinhard, 2: Uncharted2, 3: None
     float g_BloomIntensity;
     
-    float3 g_BloomTint;
+    float g_BloomTintR;
+    float g_BloomTintG;
+    float g_BloomTintB;
     float g_BloomEnabled;
 }
 
@@ -71,7 +73,8 @@ float4 main(VSOutput input) : SV_TARGET
     if (g_BloomEnabled > 0.5f)
     {
         float3 bloomColor = g_BloomBuffer.Sample(g_LinearSampler, input.TexCoord).rgb;
-        hdrColor += bloomColor * g_BloomTint * g_BloomIntensity;
+        float3 bloomTint = float3(g_BloomTintR, g_BloomTintG, g_BloomTintB);
+        hdrColor += bloomColor * bloomTint * g_BloomIntensity;
     }
     
     // Apply exposure

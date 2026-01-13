@@ -224,7 +224,7 @@ namespace Sea
         psoDesc.vertexShader = vsResult.bytecode;
         psoDesc.pixelShader = psResult.bytecode;
         psoDesc.inputLayout = inputLayout;
-        psoDesc.rtvFormats = { Format::R8G8B8A8_UNORM };
+        psoDesc.rtvFormats = { Format::R16G16B16A16_FLOAT };  // HDR output for post-processing
         psoDesc.dsvFormat = Format::D32_FLOAT;
         psoDesc.depthEnable = true;
         psoDesc.depthWrite = true;

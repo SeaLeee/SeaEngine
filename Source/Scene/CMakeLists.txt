@@ -18,6 +18,8 @@ add_library(SeaScene STATIC
     SkyRenderer.h
     BloomRenderer.cpp
     BloomRenderer.h
+    TonemapRenderer.cpp
+    TonemapRenderer.h
     DeferredRenderer.cpp
     DeferredRenderer.h
 )
