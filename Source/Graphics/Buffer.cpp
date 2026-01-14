@@ -9,10 +9,11 @@ namespace Sea
 
     bool Buffer::Initialize(const void* data)
     {
-        bool useUploadHeap = (m_Desc.type == BufferType::Upload || m_Desc.type == BufferType::Constant);
+        // Structured buffers that need UAV must use Default heap
+        bool needsDefaultHeap = (m_Desc.type == BufferType::Structured);
         
         D3D12_HEAP_PROPERTIES heapProps = {};
-        heapProps.Type = useUploadHeap ? D3D12_HEAP_TYPE_UPLOAD : D3D12_HEAP_TYPE_UPLOAD;  // 暂时都用 Upload 堆，简化实现
+        heapProps.Type = (needsDefaultHeap) ? D3D12_HEAP_TYPE_DEFAULT : D3D12_HEAP_TYPE_UPLOAD;
 
         D3D12_RESOURCE_DESC resourceDesc = {};
         resourceDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
@@ -22,14 +23,21 @@ namespace Sea
         resourceDesc.MipLevels = 1;
         resourceDesc.SampleDesc.Count = 1;
         resourceDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+        
+        // Set UAV flag for structured buffers
+        if (needsDefaultHeap)
+        {
+            resourceDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+        }
 
-        D3D12_RESOURCE_STATES initialState = D3D12_RESOURCE_STATE_GENERIC_READ;
+        D3D12_RESOURCE_STATES initialState = needsDefaultHeap ? 
+            D3D12_RESOURCE_STATE_COMMON : D3D12_RESOURCE_STATE_GENERIC_READ;
 
         m_Resource = m_Device.CreateCommittedResource(heapProps, D3D12_HEAP_FLAG_NONE, resourceDesc, initialState);
         if (!m_Resource) return false;
 
-        // 对于 Upload 堆，直接写入数据
-        if (data)
+        // For Upload heap, write data directly. For Default heap with initial data, use upload buffer
+        if (data && !needsDefaultHeap)
         {
             void* mapped = Map();
             if (mapped)
@@ -38,6 +46,8 @@ namespace Sea
                 Unmap();
             }
         }
+        // TODO: For Default heap buffers with initial data, would need to use a staging upload buffer
+        
         return true;
     }
 

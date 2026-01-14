@@ -9,6 +9,7 @@
 #include "Scene/SceneRenderer.h"
 #include "Scene/SceneManager.h"
 #include "Scene/Ocean.h"
+#include "Scene/OceanFFT.h"
 #include "Scene/SkyRenderer.h"
 #include "Scene/BloomRenderer.h"
 #include "Scene/TonemapRenderer.h"
@@ -58,6 +59,8 @@ namespace Sea
         Scope<Camera> m_Camera;
         Scope<SceneManager> m_SceneManager;
         Scope<Ocean> m_Ocean;
+        Scope<OceanFFT> m_OceanFFT;  // FFT-based ocean (GodotOceanWaves style)
+        bool m_UseFFTOcean = true;   // Toggle between Gerstner and FFT ocean
         Scope<SkyRenderer> m_SkyRenderer;
         Scope<BloomRenderer> m_BloomRenderer;
         Scope<TonemapRenderer> m_TonemapRenderer;

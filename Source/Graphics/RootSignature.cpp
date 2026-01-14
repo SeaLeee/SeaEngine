@@ -51,13 +51,22 @@ namespace Sea
         rootSigDesc.Flags = m_Desc.flags;
 
         ComPtr<ID3DBlob> signature, error;
-        if (FAILED(D3D12SerializeRootSignature(&rootSigDesc, D3D_ROOT_SIGNATURE_VERSION_1, &signature, &error)))
+        HRESULT hr = D3D12SerializeRootSignature(&rootSigDesc, D3D_ROOT_SIGNATURE_VERSION_1, &signature, &error);
+        if (FAILED(hr))
         {
-            SEA_CORE_ERROR("Failed to serialize root signature: {}", error ? (char*)error->GetBufferPointer() : "");
+            SEA_CORE_ERROR("Failed to serialize root signature: {} (HRESULT: 0x{:08X})", 
+                error ? (char*)error->GetBufferPointer() : "Unknown", hr);
             return false;
         }
 
-        return SUCCEEDED(m_Device.GetDevice()->CreateRootSignature(0, signature->GetBufferPointer(),
-            signature->GetBufferSize(), IID_PPV_ARGS(&m_RootSignature)));
+        hr = m_Device.GetDevice()->CreateRootSignature(0, signature->GetBufferPointer(),
+            signature->GetBufferSize(), IID_PPV_ARGS(&m_RootSignature));
+        if (FAILED(hr))
+        {
+            SEA_CORE_ERROR("CreateRootSignature failed with HRESULT: 0x{:08X}", hr);
+            return false;
+        }
+        
+        return true;
     }
 }

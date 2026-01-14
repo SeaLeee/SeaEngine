@@ -1,0 +1,68 @@
+{
+  "name": "OceanFFT",
+  "description": "FFT-based Ocean simulation using JONSWAP spectrum (GodotOceanWaves style)",
+  "version": "1.0",
+  "camera": {
+    "position": [0, 20, -60],
+    "lookAt": [0, 0, 100],
+    "fov": 60,
+    "near": 0.1,
+    "far": 10000
+  },
+  "environment": {
+    "type": "oceanfft",
+    "fftOceanParams": {
+      "mapSize": 256,
+      "numCascades": 3,
+      "depth": 100,
+      "updatesPerSecond": 60
+    },
+    "cascades": [
+      {
+        "tileLength": 250,
+        "windSpeed": 20,
+        "windDirection": 45,
+        "swell": 0.8,
+        "spread": 0.2,
+        "displacementScale": 1.0,
+        "normalScale": 1.0
+      },
+      {
+        "tileLength": 50,
+        "windSpeed": 15,
+        "windDirection": 45,
+        "swell": 0.6,
+        "spread": 0.3,
+        "displacementScale": 0.5,
+        "normalScale": 1.2
+      },
+      {
+        "tileLength": 10,
+        "windSpeed": 10,
+        "windDirection": 45,
+        "swell": 0.4,
+        "spread": 0.5,
+        "displacementScale": 0.2,
+        "normalScale": 1.5
+      }
+    ],
+    "sunDirection": [-0.5, -0.7, 0.5],
+    "sunIntensity": 2.5,
+    "waterColor": [0.02, 0.06, 0.12, 1.0],
+    "foamColor": [0.8, 0.75, 0.7, 1.0]
+  },
+  "sky": {
+    "enabled": true,
+    "sunDirection": [-0.5, -0.7, 0.5],
+    "turbidity": 2.5
+  },
+  "lights": [
+    {
+      "type": "directional",
+      "direction": [-0.5, -0.7, 0.5],
+      "color": [1.0, 0.95, 0.85],
+      "intensity": 2.5
+    }
+  ],
+  "objects": []
+}

@@ -372,7 +372,7 @@ namespace Sea
             m_SkyRenderer.reset();
         }
         
-        // 创建海洋模拟
+        // 创建海洋模拟 - Gerstner 版本 (旧版)
         m_Ocean = MakeScope<Ocean>(*m_Device);
         OceanParams oceanParams;
         oceanParams.patchSize = 500.0f;
@@ -383,6 +383,24 @@ namespace Sea
         {
             SEA_CORE_WARN("Failed to initialize Ocean simulation - Ocean scenes will not be available");
             m_Ocean.reset();
+        }
+        
+        // 创建 FFT 海洋模拟 - GodotOceanWaves 风格
+        m_OceanFFT = MakeScope<OceanFFT>(*m_Device);
+        OceanFFTParams fftParams;
+        fftParams.mapSize = 256;
+        fftParams.numCascades = 3;
+        fftParams.depth = 50.0f;
+        fftParams.updatesPerSecond = 60.0f;
+        fftParams.roughness = 0.3f;
+        fftParams.normalStrength = 1.0f;
+        fftParams.waterColor = { 0.02f, 0.06f, 0.1f, 1.0f };
+        fftParams.foamColor = { 0.8f, 0.85f, 0.9f, 1.0f };
+        if (!m_OceanFFT->Initialize(fftParams))
+        {
+            SEA_CORE_WARN("Failed to initialize OceanFFT - FFT Ocean will not be available");
+            m_OceanFFT.reset();
+            m_UseFFTOcean = false;
         }
         
         // 创建 Bloom 渲染器
@@ -416,11 +434,18 @@ namespace Sea
             // 检测是否为海洋场景
             m_OceanSceneActive = (sceneName.find("Ocean") != std::string::npos);
             
+            // 如果是 OceanFFT 场景，强制使用 FFT 海洋
+            if (sceneName.find("OceanFFT") != std::string::npos)
+            {
+                m_UseFFTOcean = true;
+                SEA_CORE_INFO("OceanFFT scene detected - enabling FFT ocean");
+            }
+            
             if (m_OceanSceneActive)
             {
                 // 为海洋场景设置相机
-                m_Camera->SetPosition({ 0, 15, -40 });
-                m_Camera->LookAt({ 0, 0, 50 });
+                m_Camera->SetPosition({ 0, 20, -60 });
+                m_Camera->LookAt({ 0, 0, 100 });
             }
         });
         
@@ -523,6 +548,7 @@ namespace Sea
         m_Meshes.clear();
         m_GridMesh.reset();
         m_SkyRenderer.reset();
+        m_OceanFFT.reset();
         m_Ocean.reset();
         m_Renderer.reset();
         m_Camera.reset();
@@ -850,6 +876,11 @@ namespace Sea
                                 m_SceneManager->ApplyToCamera(*m_Camera);
                                 // 检测是否为海洋场景
                                 m_OceanSceneActive = (sceneNames[i].find("Ocean") != std::string::npos);
+                                // OceanFFT 场景自动启用 FFT 海洋
+                                if (sceneNames[i].find("OceanFFT") != std::string::npos)
+                                {
+                                    m_UseFFTOcean = true;
+                                }
                             }
                             if (isSelected)
                                 ImGui::SetItemDefaultFocus();
@@ -1942,12 +1973,92 @@ namespace Sea
             }
             
             // Ocean 渲染设置 (AAA 级)
-            if (m_Ocean && ImGui::CollapsingHeader("Ocean Rendering (AAA)"))
+            if (ImGui::CollapsingHeader("Ocean Rendering (AAA)"))
             {
-                auto& params = m_Ocean->GetParams();
+                // FFT Ocean 切换
+                if (m_OceanFFT)
+                {
+                    ImGui::Checkbox("Use FFT Ocean (GodotOceanWaves)", &m_UseFFTOcean);
+                    ImGui::SameLine();
+                    ImGui::TextDisabled("(?)");
+                    if (ImGui::IsItemHovered())
+                    {
+                        ImGui::BeginTooltip();
+                        ImGui::Text("FFT-based ocean simulation");
+                        ImGui::Text("Features: JONSWAP/TMA spectrum,");
+                        ImGui::Text("Stockham FFT, multi-cascade waves,");
+                        ImGui::Text("GGX specular, subsurface scattering");
+                        ImGui::EndTooltip();
+                    }
+                }
                 
-                // QuadTree LOD 设置
-                bool useQuadTree = m_Ocean->GetUseQuadTree();
+                if (m_UseFFTOcean && m_OceanFFT)
+                {
+                    ImGui::Separator();
+                    ImGui::Text("FFT Ocean Settings:");
+                    
+                    auto& fftParams = m_OceanFFT->GetParams();
+                    
+                    ImGui::SliderFloat("Roughness##FFT", &fftParams.roughness, 0.0f, 1.0f);
+                    ImGui::SliderFloat("Normal Strength##FFT", &fftParams.normalStrength, 0.0f, 3.0f);
+                    
+                    // Water color
+                    float waterColor[3] = { fftParams.waterColor.x, fftParams.waterColor.y, fftParams.waterColor.z };
+                    if (ImGui::ColorEdit3("Water Color##FFT", waterColor))
+                    {
+                        fftParams.waterColor = { waterColor[0], waterColor[1], waterColor[2], 1.0f };
+                    }
+                    
+                    // Foam color
+                    float foamColor[3] = { fftParams.foamColor.x, fftParams.foamColor.y, fftParams.foamColor.z };
+                    if (ImGui::ColorEdit3("Foam Color##FFT", foamColor))
+                    {
+                        fftParams.foamColor = { foamColor[0], foamColor[1], foamColor[2], 1.0f };
+                    }
+                    
+                    // Cascade settings
+                    if (ImGui::TreeNode("Wave Cascades"))
+                    {
+                        for (u32 i = 0; i < fftParams.numCascades; ++i)
+                        {
+                            auto& cascade = m_OceanFFT->GetCascadeParams(i);
+                            if (ImGui::TreeNode((void*)(intptr_t)i, "Cascade %d", i))
+                            {
+                                bool changed = false;
+                                changed |= ImGui::SliderFloat("Tile Length", &cascade.tileLength, 1.0f, 500.0f);
+                                changed |= ImGui::SliderFloat("Wind Speed", &cascade.windSpeed, 1.0f, 50.0f);
+                                changed |= ImGui::SliderFloat("Swell", &cascade.swell, 0.0f, 1.0f);
+                                changed |= ImGui::SliderFloat("Spread", &cascade.spread, 0.0f, 1.0f);
+                                changed |= ImGui::SliderFloat("Displacement Scale", &cascade.displacementScale, 0.0f, 2.0f);
+                                changed |= ImGui::SliderFloat("Normal Scale", &cascade.normalScale, 0.0f, 3.0f);
+                                
+                                if (changed)
+                                {
+                                    cascade.needsSpectrumRebuild = true;
+                                }
+                                ImGui::TreePop();
+                            }
+                        }
+                        ImGui::TreePop();
+                    }
+                    
+                    // View mode
+                    int viewMode = m_OceanFFT->GetViewMode();
+                    if (ImGui::Combo("View Mode##FFT", &viewMode, "Lit\0Wireframe\0"))
+                    {
+                        m_OceanFFT->SetViewMode(viewMode);
+                    }
+                }
+                else if (m_Ocean)
+                {
+                    // Legacy Gerstner ocean settings
+                    ImGui::Separator();
+                    ImGui::Text("Gerstner Ocean Settings:");
+                    
+                    auto& params = m_Ocean->GetParams();
+                
+                    // QuadTree LOD 设置
+                    bool useQuadTree = m_Ocean->GetUseQuadTree();
                 if (ImGui::Checkbox("QuadTree LOD", &useQuadTree))
                 {
                     m_Ocean->SetUseQuadTree(useQuadTree);
@@ -2050,7 +2161,8 @@ namespace Sea
                     }
                     ImGui::TreePop();
                 }
-            }
+                } // end else if (m_Ocean)
+            } // end CollapsingHeader Ocean
         }
         ImGui::End();
     }
@@ -2312,11 +2424,19 @@ namespace Sea
                 }
 
                 // 根据场景类型渲染
-                if (m_OceanSceneActive && m_Ocean)
+                if (m_OceanSceneActive)
                 {
-                    // 渲染海洋场景
-                    m_Ocean->Update(0.016f, *cmdList);  // 假设60fps
-                    m_Ocean->Render(*cmdList, *m_Camera);
+                    // 渲染海洋场景 - 优先使用 FFT 海洋
+                    if (m_UseFFTOcean && m_OceanFFT)
+                    {
+                        m_OceanFFT->Update(0.016f, *cmdList);
+                        m_OceanFFT->Render(*cmdList, *m_Camera);
+                    }
+                    else if (m_Ocean)
+                    {
+                        m_Ocean->Update(0.016f, *cmdList);
+                        m_Ocean->Render(*cmdList, *m_Camera);
+                    }
                 }
                 else
                 {

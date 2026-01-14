@@ -14,6 +14,8 @@ add_library(SeaScene STATIC
     SceneManager.h
     Ocean.cpp
     Ocean.h
+    OceanFFT.cpp
+    OceanFFT.h
     OceanQuadTree.cpp
     OceanQuadTree.h
     SkyRenderer.cpp
