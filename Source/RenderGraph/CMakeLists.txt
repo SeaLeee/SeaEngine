@@ -1,4 +1,10 @@
 add_library(SeaRenderGraph STATIC
+    # New FrameGraph system (RHI-based)
+    FrameGraph.cpp
+    FrameGraph.h
+    DeferredFrameGraph.h
+    
+    # Legacy RenderGraph (to be deprecated)
     RenderGraph.cpp
     RenderPassContext.cpp
     ResourceNode.cpp
@@ -16,6 +22,7 @@ target_include_directories(SeaRenderGraph PUBLIC
 
 target_link_libraries(SeaRenderGraph PUBLIC 
     SeaCore
+    SeaRHI
     SeaGraphics
     nlohmann_json::nlohmann_json
 )

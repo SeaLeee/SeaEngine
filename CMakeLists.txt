@@ -127,6 +127,8 @@ target_link_libraries(imnodes_lib PUBLIC imgui_lib)
 
 # 子目录
 add_subdirectory(Source/Core)
+add_subdirectory(Source/RHI)
+add_subdirectory(Source/RHI_DX12)
 add_subdirectory(Source/Graphics)
 add_subdirectory(Source/RenderGraph)
 add_subdirectory(Source/Shader)
@@ -141,6 +143,8 @@ endif()
 add_library(SeaEngine INTERFACE)
 target_link_libraries(SeaEngine INTERFACE
     SeaCore
+    SeaRHI
+    SeaRHI_DX12
     SeaGraphics
     SeaRenderGraph
     SeaShader
